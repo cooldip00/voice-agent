@@ -1,0 +1,9 @@
+[project]
+name = "voice-agent"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "nvidia-cublas-cu12>=12.9.2.10",
+    "nvidia-cudnn-cu12==9.*",
+    "pipecat-ai[kokoro,local-smart-turn,runner,silero,webrtc,whisper]==1.12.0",
+]

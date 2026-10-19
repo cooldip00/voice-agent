@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+
+# models and generated audio
+models/
+recordings/
+*.wav
+
+# runtime data (recreated by scripts)
+data/*.db
+calls/
+metrics/
+
+# personal study notes
+docs/study/
