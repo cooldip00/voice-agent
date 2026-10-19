@@ -10,8 +10,8 @@ dev laptop (RTX 3070 Ti Laptop, 8 GB) and the output shown is real.
 |---|---|---|---|
 | 0 | [00-setup.md](00-setup.md) | Environment check; each model alone: Ollama, Kokoro, Whisper, Silero VAD, Smart Turn | done |
 | 1 | [01-parts.md](01-parts.md) | `try_tts` / `try_stt` / `try_llm`, each timed | done |
-| 2 | 02-talking-bot.md | Browser call with interruptions | next |
-| 3 | 03-bank-and-tools.md | Fake bank, tools, rules, `pytest` | |
+| 2 | [02-bot.md](02-bot.md) | `agent.bot`: browser call with interruptions | done |
+| 3 | 03-bank-and-tools.md | Fake bank, tools, rules, `pytest` | next |
 | 4 | 04-collections-call.md | Full call, end-of-call JSON in `calls/` | |
 | 5 | 05-latency.md | `latency_report.py`, 3B vs 7B | |
 | 6 | 06-testbench.md | `testbench/run.py`, 8 scenarios | |

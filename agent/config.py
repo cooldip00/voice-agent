@@ -13,6 +13,7 @@ STT_COMPUTE_TYPE = "int8_float16"
 OLLAMA_BASE = "http://127.0.0.1:11434"  # not "localhost": on Windows it tries IPv6 first and adds ~2 s per request
 LLM_MODEL = "qwen2.5:7b"         # compare with "qwen2.5:3b" in step 5
 LLM_MODELS_NEEDED = ["qwen2.5:7b", "qwen2.5:3b"]
+LLM_KEEP_ALIVE = "30m"           # how long Ollama keeps the model in VRAM after the startup warm-up
 
 # Voice (Kokoro, runs on CPU through ONNX; Pipecat caches its files in ~/.cache/pipecat/kokoro-onnx)
 TTS_VOICE = "af_heart"
