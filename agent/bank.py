@@ -51,6 +51,13 @@ CREATE TABLE disputes (
     reason     TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+CREATE TABLE escalations (
+    id         INTEGER PRIMARY KEY,
+    loan_id    TEXT NOT NULL REFERENCES loans(id),
+    call_id    TEXT NOT NULL,
+    reason     TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 # One customer per test-bench scenario (step 6). All names and numbers are made up.
@@ -138,5 +145,13 @@ def add_dispute(conn: sqlite3.Connection, loan_id: str, call_id: str, kind: str,
     conn.execute(
         "INSERT INTO disputes (loan_id, call_id, kind, reason, created_at) VALUES (?, ?, ?, ?, ?)",
         (loan_id, call_id, kind, reason, _now()),
+    )
+    conn.commit()
+
+
+def add_escalation(conn: sqlite3.Connection, loan_id: str, call_id: str, reason: str) -> None:
+    conn.execute(
+        "INSERT INTO escalations (loan_id, call_id, reason, created_at) VALUES (?, ?, ?, ?)",
+        (loan_id, call_id, reason, _now()),
     )
     conn.commit()

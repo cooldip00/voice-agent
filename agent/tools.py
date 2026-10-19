@@ -1,9 +1,9 @@
-"""The six tools the LLM can call during a collections call, and their descriptions for Pipecat.
+"""The seven tools the LLM can call during a collections call, and their descriptions for Pipecat.
 
 Every tool acts on the customer this call was placed to (`state.customer_id`); none takes a customer
 or loan id from the LLM. Loan details and anything recorded against the loan need a verified identity.
 Results are dicts; a refusal is {"ok": False, "error": <code>, "message": <what to do instead>} and
-never contains loan data. The tools are wired into the bot in step 4.
+never contains loan data. The bot (agent/bot.py) registers each one with the LLM.
 """
 
 import sqlite3
@@ -22,7 +22,9 @@ from agent.call_state import (
     check_callback,
     check_outcome,
     check_promise,
-    parse_date,
+    resolve_birth_date,
+    resolve_day,
+    resolve_time,
 )
 
 NOT_VERIFIED = {
@@ -30,10 +32,16 @@ NOT_VERIFIED = {
     "error": "not_verified",
     "message": "Identity is not verified. Ask for the date of birth first. Do not share or discuss loan details.",
 }
+NO_NOTICE = {
+    "ok": False,
+    "error": "notice_not_given",
+    "message": "The caller has not heard the recording notice. First say: Please note, this call is recorded. "
+               "Then ask for the date of birth again.",
+}
 LOCKED = {
     "ok": False,
     "error": "locked",
-    "message": "Too many wrong dates of birth. Do not discuss the loan. Offer a callback, then end the call.",
+    "message": "Too many wrong dates of birth. Do not say why you are calling. Offer a callback, then end the call.",
 }
 
 
@@ -76,12 +84,16 @@ class CallTools:
             return {"ok": True, "verified": True}
         if self.state.locked:
             return LOCKED
-        dob = parse_date(date_of_birth)
+        if not self.state.notice_given:
+            return NO_NOTICE
+        dob = resolve_birth_date(date_of_birth)
         if dob is None:
-            return _refused("bad_format", "Send the date of birth as YYYY-MM-DD. This try was not counted.")
+            return _refused("bad_format", "Ask the caller for their full date of birth: day, month and year. "
+                                          "This try was not counted.")
         if dob.isoformat() == self.customer["date_of_birth"]:
             self.state.verified = True
-            return {"ok": True, "verified": True}
+            # The loan comes with the success, so the LLM can't skip get_loan_details and guess the facts.
+            return {"ok": True, "verified": True, "loan": self._loan_facts()}
         self.state.verify_attempts += 1
         if self.state.locked:
             return LOCKED
@@ -92,10 +104,12 @@ class CallTools:
     def get_loan_details(self) -> dict:
         if refusal := self._gate():
             return refusal
+        return {"ok": True, **self._loan_facts()}
+
+    def _loan_facts(self) -> dict:
         today = self.clock().date()
         due = datetime.fromisoformat(self.loan["due_date"]).date()
         return {
-            "ok": True,
             "customer_name": self.customer["name"],
             "product": self.loan["product"],
             "emi": self.loan["emi"],
@@ -105,19 +119,30 @@ class CallTools:
             "last_payment": bank.last_payment(self.conn, self.loan["id"]),
         }
 
-    def record_promise(self, amount, date: str) -> dict:
+    def record_promise(self, amount, day: str) -> dict:
         if refusal := self._gate():
             return refusal
-        if problem := check_promise(amount, date, self.clock().date(), self.loan["amount_due"]):
+        today = self.clock().date()
+        pay_by = resolve_day(day, today)
+        if pay_by is None:
+            return _refused("invalid_promise", "Nothing recorded; don't read this out. Call record_promise again "
+                                               "with day as the caller said it, like Friday or tomorrow")
+        if problem := check_promise(amount, pay_by.isoformat(), today, self.loan["amount_due"]):
             return _refused("invalid_promise", problem)
-        rupees, pay_by = as_rupees(amount), parse_date(date)
+        rupees = as_rupees(amount)
         bank.add_promise(self.conn, self.loan["id"], self.state.call_id, rupees, pay_by)
         self.state.promise = {"amount": rupees, "pay_by": pay_by.isoformat()}
         return {"ok": True, **self.state.promise}
 
-    def schedule_callback(self, call_at: str) -> dict:
+    def schedule_callback(self, day: str, time: str) -> dict:
         # No identity needed: whoever answers may ask us to call back, and nothing about the loan is said.
-        if problem := check_callback(call_at, self.clock()):
+        now = self.clock()
+        on, at = resolve_day(day, now.date()), resolve_time(time)
+        if on is None or at is None:
+            return _refused("invalid_callback", "Nothing scheduled; don't read this out. Call schedule_callback again "
+                                                "with day as the caller said it, like tomorrow, and time like 17:00")
+        call_at = f"{on.isoformat()}T{at[0]:02d}:{at[1]:02d}"
+        if problem := check_callback(call_at, now):
             return _refused("invalid_callback", problem)
         when = datetime.fromisoformat(call_at)
         bank.add_callback(self.conn, self.state.customer_id, self.state.call_id, when)
@@ -136,6 +161,16 @@ class CallTools:
         self.state.dispute = {"kind": kind, "reason": reason}
         return {"ok": True, **self.state.dispute}
 
+    def escalate_to_human(self, reason: str) -> dict:
+        if refusal := self._gate():
+            return refusal
+        reason = (reason or "").strip()[:500]
+        if not reason:
+            return _refused("invalid_escalation", "give the reason in a few words")
+        bank.add_escalation(self.conn, self.loan["id"], self.state.call_id, reason)
+        self.state.escalation = reason
+        return {"ok": True, "message": "A human agent will call within two working days. Tell the customer so."}
+
     def end_call(self, outcome: str) -> dict:
         if problem := check_outcome(self.state, outcome):
             return _refused("invalid_outcome", problem)
@@ -146,8 +181,9 @@ class CallTools:
 SCHEMAS = [
     FunctionSchema(
         name="verify_identity",
-        description="Check the caller's date of birth. Call this before discussing the loan in any way.",
-        properties={"date_of_birth": {"type": "string", "description": "Date of birth as YYYY-MM-DD"}},
+        description="Check the caller's date of birth. Call this before discussing the loan in any way. "
+                    "On success it also returns the loan details.",
+        properties={"date_of_birth": {"type": "string", "description": "The date of birth as the caller said it"}},
         required=["date_of_birth"],
     ),
     FunctionSchema(
@@ -161,15 +197,20 @@ SCHEMAS = [
         description="Record the customer's promise to pay an amount by a date (at most 7 days from today).",
         properties={
             "amount": {"type": "integer", "description": "Amount in whole rupees"},
-            "date": {"type": "string", "description": "Payment date as YYYY-MM-DD"},
+            "day": {"type": "string", "description": "The day as the caller said it: a weekday like Friday, "
+                                                   "today, tomorrow, or a date as YYYY-MM-DD"},
         },
-        required=["amount", "date"],
+        required=["amount", "day"],
     ),
     FunctionSchema(
         name="schedule_callback",
         description="Schedule a call back when the person asks to be called later.",
-        properties={"call_at": {"type": "string", "description": "Local time as YYYY-MM-DDTHH:MM, 08:00 to 19:00"}},
-        required=["call_at"],
+        properties={
+            "day": {"type": "string", "description": "The day as the caller said it: today, tomorrow, a weekday "
+                                                   "like Friday, or a date as YYYY-MM-DD"},
+            "time": {"type": "string", "description": "Time like 17:00 or 5 pm, between 08:00 and 19:00"},
+        },
+        required=["day", "time"],
     ),
     FunctionSchema(
         name="flag_dispute",
@@ -181,11 +222,37 @@ SCHEMAS = [
         required=["kind", "reason"],
     ),
     FunctionSchema(
+        name="escalate_to_human",
+        description="Pass the case to a human agent: hardship (lost job, illness), a request for a human, "
+                    "or a promise below the minimum.",
+        properties={"reason": {"type": "string", "description": "What the customer said, in a few words"}},
+        required=["reason"],
+    ),
+    FunctionSchema(
         name="end_call",
-        description="End the call with its outcome, after saying goodbye.",
+        description="End the call with its outcome. Do not say goodbye yourself; the system says it.",
         properties={"outcome": {"type": "string", "enum": list(OUTCOMES)}},
         required=["outcome"],
     ),
 ]
 TOOL_NAMES = {s.name for s in SCHEMAS}
 TOOLS = ToolsSchema(standard_tools=SCHEMAS)
+
+# What the LLM sees until the date of birth matches: three tools whose descriptions say nothing about a
+# debt (the full list would give it away: record_promise, flag_dispute...). The bot swaps in TOOLS after.
+IDENTITY_SCHEMAS = [
+    FunctionSchema(
+        name="verify_identity",
+        description="Check the caller's date of birth to confirm who they are.",
+        properties=SCHEMAS[0].properties,
+        required=SCHEMAS[0].required,
+    ),
+    next(s for s in SCHEMAS if s.name == "schedule_callback"),
+    FunctionSchema(
+        name="end_call",
+        description="End the call with its outcome. Do not say goodbye yourself; the system says it.",
+        properties={"outcome": {"type": "string", "enum": ["callback", "wrong_person", "no_resolution"]}},
+        required=["outcome"],
+    ),
+]
+IDENTITY_TOOLS = ToolsSchema(standard_tools=IDENTITY_SCHEMAS)

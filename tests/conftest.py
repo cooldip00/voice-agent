@@ -22,7 +22,7 @@ def conn(tmp_path):
 
 @pytest.fixture
 def state():
-    return CallState(call_id="test-call", customer_id=1)
+    return CallState(call_id="test-call", customer_id=1, notice_given=True)   # greeting played in full
 
 
 @pytest.fixture

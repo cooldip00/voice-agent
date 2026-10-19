@@ -1,5 +1,8 @@
 # Step 3: fake bank, tools, call rules
 
+> Step 4 changed some tools: `record_promise(amount, day)`, `schedule_callback(day, time)`, a DOB as the caller says it,
+> and a 7th tool, `escalate_to_human`. See [04-collections-call.md](04-collections-call.md). The snippet below is the step 3 version.
+
 No models in this step. It is plain Python that the bot will call in step 4, plus tests that prove
 the rules hold. Code: [agent/bank.py](../../agent/bank.py), [agent/call_state.py](../../agent/call_state.py),
 [agent/tools.py](../../agent/tools.py), tests in [tests/](../../tests/).

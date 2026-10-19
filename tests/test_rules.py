@@ -1,4 +1,5 @@
-from datetime import datetime
+import json
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -7,8 +8,15 @@ from agent.call_state import (
     as_rupees,
     check_callback,
     check_outcome,
+    call_record,
     check_promise,
+    join_caller_turns,
     parse_date,
+    resolve_birth_date,
+    resolve_day,
+    resolve_time,
+    transcript,
+    unsafe_to_say,
     within_call_hours,
 )
 from tests.conftest import NOW, TODAY
@@ -44,7 +52,7 @@ def test_as_rupees_rejects(value):
 
 @pytest.mark.parametrize(
     "amount, day",
-    [(4500, "2026-10-20"), (1, "2026-10-27"), (2000, "2026-10-23")],
+    [(4500, "2026-10-20"), (1125, "2026-10-27"), (2000, "2026-10-23")],   # 1125 = 25% of 4500
 )
 def test_promise_ok(amount, day):
     assert check_promise(amount, day, TODAY, amount_due=4500) is None
@@ -55,6 +63,8 @@ def test_promise_ok(amount, day):
     [
         (0, "2026-10-23", "at least 1"),
         (-100, "2026-10-23", "at least 1"),
+        (1124, "2026-10-23", "below the minimum of 1125"),
+        (500, "2026-10-23", "human agent"),
         (4501, "2026-10-23", "more than"),
         (4500.5, "2026-10-23", "whole number"),
         (4500, "2026-10-19", "past"),
@@ -91,6 +101,7 @@ def test_outcome_must_match_what_was_recorded():
     assert "no promise" in check_outcome(s, "promise_to_pay")
     assert "no callback" in check_outcome(s, "callback")
     assert "no dispute" in check_outcome(s, "dispute")
+    assert "nothing was escalated" in check_outcome(s, "escalated")
     assert "verified customer" in check_outcome(s, "refused")
     assert check_outcome(s, "wrong_person") is None
     assert check_outcome(s, "no_resolution") is None
@@ -110,3 +121,143 @@ def test_lock_after_three_wrong_attempts():
     assert s.locked
     s.verified = True
     assert not s.locked
+
+
+def test_minimum_rounds_up():
+    assert check_promise(525, "2026-10-23", TODAY, amount_due=2100) is None       # 25% of 2100 = 525
+    assert "minimum of 26" in check_promise(25, "2026-10-23", TODAY, amount_due=101)  # 25.25 -> 26
+
+
+# --- end-of-call record ------------------------------------------------------------------------
+
+MESSAGES = [
+    {"role": "system", "content": "You are Asha"},
+    {"role": "assistant", "content": "Hello, this is Asha from Kosha Finance."},
+    {"role": "user", "content": "Yes, speaking."},
+    {"role": "assistant", "tool_calls": [{"id": "1", "function": {"name": "verify_identity"}}]},
+    {"role": "tool", "tool_call_id": "1", "content": '{"ok": true}'},
+    {"role": "assistant", "content": "   "},
+]
+
+
+def test_transcript_keeps_only_spoken_turns():
+    assert transcript(MESSAGES) == [
+        {"role": "bot", "text": "Hello, this is Asha from Kosha Finance."},
+        {"role": "caller", "text": "Yes, speaking."},
+    ]
+
+
+def test_transcript_leaves_out_silenced_sentences():
+    messages = [{"role": "assistant", "content": "I understand. It's about your overdue EMI. When is good?"},
+                {"role": "assistant", "content": "It's about your overdue EMI."}]
+    assert transcript(messages, ["It's about your overdue EMI. "]) == [
+        {"role": "bot", "text": "I understand. When is good?"}]
+
+
+def test_call_record_comes_from_state_not_from_the_llm():
+    s = CallState(call_id="c", customer_id=1, verified=True, notice_given=True, outcome="promise_to_pay",
+                  promise={"amount": 4500, "pay_by": "2026-10-23"})
+    # the LLM claiming something in the transcript changes nothing in the record
+    said = MESSAGES + [{"role": "assistant", "content": "I've noted 9000 rupees by next month."}]
+    record = call_record(s, said, NOW, NOW + timedelta(seconds=95))
+    assert {k: record[k] for k in ("outcome", "promise_date", "amount", "reason", "callback")} == {
+        "outcome": "promise_to_pay", "promise_date": "2026-10-23", "amount": 4500, "reason": None, "callback": None,
+    }
+    assert record["ended_by"] == "agent" and record["seconds"] == 95.0
+    json.dumps(record)   # must be serializable
+
+
+def test_call_record_when_the_caller_hangs_up():
+    s = CallState(call_id="c", customer_id=1, escalation="lost his job")
+    record = call_record(s, [], NOW, NOW)
+    # no end_call, so the outcome comes from what the tools recorded
+    assert record["outcome"] == "escalated" and record["ended_by"] == "caller"
+    assert record["reason"] == "lost his job" and record["amount"] is None
+    assert call_record(CallState(call_id="c", customer_id=1), [], NOW, NOW)["outcome"] == "no_resolution"
+
+
+@pytest.mark.parametrize("text", [
+    "I'm calling about your loan.",
+    "Your EMI of 4500 rupees is overdue.",
+    "It's regarding a payment.",
+])
+def test_no_debt_talk_before_verification(text):
+    assert "before identity" in unsafe_to_say(text, CallState(call_id="t", customer_id=1))
+    assert unsafe_to_say(text, CallState(call_id="t", customer_id=1, verified=True)) is None
+
+
+def test_no_format_talk():
+    assert "format" in unsafe_to_say("Please say it in YYYY-MM-DD format.", CallState(call_id="t", customer_id=1))
+
+
+def test_no_claim_before_a_tool_recorded_it():
+    state = CallState(call_id="t", customer_id=1, verified=True)
+    assert "claims" in unsafe_to_say("I've recorded your promise.", state)
+    assert unsafe_to_say("Please note, this call is recorded.", state) is None
+    assert unsafe_to_say("So 4500 rupees by Friday, is that right?", state) is None
+    state.promise = {"amount": 4500, "pay_by": "2026-10-23"}
+    assert unsafe_to_say("I've recorded your promise.", state) is None
+
+
+
+def test_no_dates_that_no_tool_gave():
+    state = CallState(call_id="t", customer_id=1, verified=True)
+    assert "date no tool gave" in unsafe_to_say("Can you pay by next Friday, 2026-10-27?", state)
+    state.tool_calls.append({"name": "record_promise", "arguments": {},
+                             "result": {"ok": True, "amount": 4500, "pay_by": "2026-10-23"}})
+    assert unsafe_to_say("That is 4500 rupees by 2026-10-23.", state) is None
+    assert unsafe_to_say("Or by 2026-10-27?", state) is not None
+
+@pytest.mark.parametrize("day, expected", [
+    ("today", "2026-10-20"), ("Tomorrow", "2026-10-21"),
+    ("Friday", "2026-10-23"), ("this friday", "2026-10-23"), ("next Friday", "2026-10-23"),
+    ("Tuesday", "2026-10-27"),          # today is a Tuesday, so "Tuesday" means next week's
+    ("2026-10-25", "2026-10-25"),
+    ("Friday 2026-10-27", "2026-10-23"),   # the caller's word wins over the LLM's date
+])
+def test_resolve_day(day, expected):
+    assert resolve_day(day, TODAY).isoformat() == expected
+
+
+@pytest.mark.parametrize("day", ["someday", "23/10/2026", "", "Fri"])
+def test_resolve_day_rejects(day):
+    assert resolve_day(day, TODAY) is None
+
+
+@pytest.mark.parametrize("text", [
+    "1990-03-05", "5th of March, 1990", "the 5th of March 1990", "5 March 1990", "March 5th, 1990",
+    "March 5 1990", "05/03/1990", "5.3.1990", "5-3-1990", "5th of March. 1990.",
+])
+def test_resolve_birth_date(text):
+    assert resolve_birth_date(text).isoformat() == "1990-03-05"
+
+
+@pytest.mark.parametrize("text", ["5th of March", "1990", "31st of February 1990", "13/13/1990", "5 Smarch 1990", ""])
+def test_resolve_birth_date_rejects(text):
+    assert resolve_birth_date(text) is None
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("17:00", (17, 0)), ("5 pm", (17, 0)), ("5:30 PM", (17, 30)), ("10 a.m.", (10, 0)),
+    ("5", (17, 0)), ("11", (11, 0)), ("12 pm", (12, 0)),
+])
+def test_resolve_time(text, expected):
+    assert resolve_time(text) == expected
+
+
+@pytest.mark.parametrize("text", ["evening", "25:00", "5:75", ""])
+def test_resolve_time_rejects(text):
+    assert resolve_time(text) is None
+
+
+def test_back_to_back_caller_turns_are_joined():
+    messages = [
+        {"role": "assistant", "content": "What is your date of birth?"},
+        {"role": "user", "content": "14th of July."},
+        {"role": "user", "content": " 1985"},
+        {"role": "assistant", "content": "Thank you."},
+        {"role": "user", "content": "Okay."},
+    ]
+    joined = join_caller_turns(messages)
+    assert [m["content"] for m in joined] == ["What is your date of birth?", "14th of July. 1985", "Thank you.", "Okay."]
+    assert messages[1]["content"] == "14th of July."   # the originals are left alone
