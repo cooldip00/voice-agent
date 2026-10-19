@@ -21,6 +21,13 @@ TTS_VOICE = "af_heart"
 # Turn-taking
 VAD_STOP_SECS = 0.2              # Smart Turn works best with a short VAD stop
 
+# Fake bank and call rules
+BANK_DB = ROOT / "data" / "bank.db"   # made by: uv run python -m scripts.seed_bank
+CALL_HOURS = (8, 19)             # a call may start from 08:00 and must start before 19:00 (RBI rule for recovery calls)
+PROMISE_MAX_DAYS = 7             # a promised payment date must be at most this many days away
+CALLBACK_MAX_DAYS = 7            # same for a callback
+MAX_VERIFY_ATTEMPTS = 3          # wrong dates of birth before the identity check locks
+
 # Outputs
 CALLS_DIR = ROOT / "calls"
 METRICS_DIR = ROOT / "metrics"
