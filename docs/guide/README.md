@@ -17,7 +17,7 @@ dev laptop (RTX 3070 Ti Laptop, 8 GB) and the output shown is real.
 | 5b | [05-latency.md § 5](05-latency.md#5-step-5b-kokoro-on-the-gpu) | Kokoro on the GPU: `check_env` shows the provider | done |
 | 6 | [06-testbench.md](06-testbench.md) | `testbench/run.py`, 9 scenarios, scored by code | done |
 | 6b | [06-testbench.md § 6](06-testbench.md#6-step-6b-code-closes-the-call) | Code ends the call after settling tools, hardship and silence: 27/27 | done |
-| 7 | 07-ship.md | README, diagram, video | |
+| 7 | [07-ship.md](07-ship.md) | README, `docs/architecture.md`, demo shot list, checks before pushing | done (video: later) |
 
 ## Rules for every command
 - Open PowerShell and run from the project root: `cd "D:\ResumeProject\voice-agent"`.
