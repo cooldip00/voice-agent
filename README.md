@@ -160,3 +160,7 @@ tests/        pytest, models faked
 docs/guide/   how to run and check each step
 ```
 All names, phone numbers and loans in the fake bank are made up.
+
+## License
+The code is [MIT](LICENSE). The models are downloaded at run time and keep their own licenses: Qwen 2.5 7B
+(Apache 2.0), Whisper and Silero VAD (MIT), Kokoro (Apache 2.0), Smart Turn (BSD 2-Clause).
