@@ -33,7 +33,9 @@ def percentile(values: list[float], q: float) -> float:
 
 
 def setup_name(setup: dict) -> str:
-    return f"{setup['llm']}, vad {setup['vad_stop_secs']}s, {setup['stt'].split('/')[-1]}"
+    # Calls from before step 5b have no tts_device: Kokoro ran on the CPU then.
+    return (f"{setup['llm']}, vad {setup['vad_stop_secs']}s, {setup['stt'].split('/')[-1]}, "
+            f"tts {setup.get('tts_device', 'cpu')}")
 
 
 def load(paths: list[Path]) -> dict[str, dict]:

@@ -64,7 +64,7 @@ class LatencyLog:
         self.observer = UserBotLatencyObserver()
         self.observer.add_event_handler("on_latency_breakdown", self._on_breakdown)
         self._write({"kind": "setup", "llm": config.LLM_MODEL, "stt": config.STT_MODEL,
-                     "vad_stop_secs": config.VAD_STOP_SECS})
+                     "vad_stop_secs": config.VAD_STOP_SECS, "tts_device": config.TTS_DEVICE})
 
     def _write(self, row: dict) -> None:
         with self.path.open("a", encoding="utf-8") as f:

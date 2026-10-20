@@ -8,7 +8,7 @@ Each call: fixed greeting with the recording notice -> date of birth -> loan -> 
 or escalation -> end_call -> fixed goodbye -> hang up. The record in calls/<call_id>.json is built from
 CallState (what the tools accepted), not from what the LLM says happened.
 
-The heavy models (Whisper on the GPU, Kokoro, Qwen in Ollama) load and warm up once, when this module
+The heavy models (Whisper and Kokoro on the GPU, Qwen in Ollama) load and warm up once, when this module
 starts, before the server accepts a call. Each call then gets its own pipeline, whose services reuse
 those models. Silero VAD and Smart Turn are small and keep per-call state, so each call makes its own.
 """
@@ -21,7 +21,7 @@ from datetime import datetime
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
 from agent import config, prompts
-from agent.gpu import enable_cuda_dlls
+from agent.gpu import enable_cuda_dlls, onnx_session
 
 enable_cuda_dlls()  # before faster_whisper is imported
 
@@ -88,9 +88,10 @@ def load_kokoro() -> Kokoro:
     model_path = KOKORO_CACHE_DIR / "kokoro-v1.0.onnx"
     voices_path = KOKORO_CACHE_DIR / "voices-v1.0.bin"
     _ensure_model_files(model_path, voices_path)
-    model = Kokoro(str(model_path), str(voices_path))
+    session = onnx_session(model_path, config.TTS_DEVICE)
+    model = Kokoro.from_session(session, str(voices_path))
     model.create("Hello.", voice=config.TTS_VOICE, lang="en-us")
-    logger.info(f"Kokoro loaded and warm in {time.perf_counter() - t:.1f}s")
+    logger.info(f"Kokoro loaded on {session.get_providers()[0]} and warm in {time.perf_counter() - t:.1f}s")
     return model
 
 
@@ -105,8 +106,10 @@ def warm_llm() -> None:
     logger.info(f"{config.LLM_MODEL} loaded in Ollama in {time.perf_counter() - t:.1f}s")
 
 
-WHISPER = load_whisper()
+# Kokoro first: onnxruntime loads its own cuBLAS, and it fails with WinError 127 when CTranslate2 (Whisper)
+# has already loaded it. In this order both share one copy.
 KOKORO = load_kokoro()
+WHISPER = load_whisper()
 warm_llm()
 
 

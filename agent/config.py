@@ -17,8 +17,9 @@ LLM_MODELS_NEEDED = ["qwen2.5:7b", "qwen2.5:3b"]
 LLM_KEEP_ALIVE = "30m"           # how long Ollama keeps the model in VRAM after the startup warm-up
 LLM_TEMPERATURE = 0.2            # low: steadier tool calls, fewer invented facts (Qwen's default is 0.7)
 
-# Voice (Kokoro, runs on CPU through ONNX; Pipecat caches its files in ~/.cache/pipecat/kokoro-onnx)
+# Voice (Kokoro through onnxruntime-gpu; Pipecat caches its files in ~/.cache/pipecat/kokoro-onnx)
 TTS_VOICE = "af_heart"
+TTS_DEVICE = os.environ.get("TTS_DEVICE", "cuda")   # step 5b: 4-6x faster than "cpu" per sentence
 
 # Turn-taking
 VAD_STOP_SECS = float(os.environ.get("VAD_STOP_SECS", "0.2"))   # Smart Turn works best with a short VAD stop

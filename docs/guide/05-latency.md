@@ -97,10 +97,40 @@ What the numbers say (the why is in the study note):
   failed because of a cut.
 - Medians from about 27 replies move by 0.1–0.2 s between runs on their own. Differences smaller than that are noise.
 
+## 5. Step 5b: Kokoro on the GPU
+Kokoro was the largest part of each reply. It now runs on the GPU through `onnxruntime-gpu`, which replaces the
+CPU package (`pyproject.toml`, `[tool.uv] override-dependencies`). Silero VAD and Smart Turn stay on the CPU.
+
+Check where it runs:
+```powershell
+uv run python -m scripts.check_env      # "Kokoro voice: ... made in 155 ms on CUDAExecutionProvider"
+uv run python -m agent.bot              # log: "Kokoro loaded on CUDAExecutionProvider and warm in 2.4s"
+```
+Back to the CPU, for a comparison: `$env:TTS_DEVICE = "cpu"`. The report adds `tts cpu` / `tts cuda` to each column.
+
+**Same 12 calls, 7B, VAD 0.2, after the amount fix (ms, p50 / p95):**
+
+| | Kokoro on CPU | **Kokoro on GPU** |
+|---|---|---|
+| speech synthesis | 699 / 1484 | **331 / 479** |
+| **voice to voice** | 1808 / 2770 | **1304 / 2445** |
+| plain replies | 1521 / 2380 | **1242 / 1612** |
+| after a tool call | 2249 / 3065 | **1800 / 2516** |
+| calls right | 10 / 12 | 12 / 12 |
+| GPU memory, whole card | 5.4 GB | 6.5 GB |
+
+- Each sentence is 4–6× faster alone (585 → 158 ms for 25 characters, 2648 → 433 ms for 106).
+- The p50 dropped by half a second. The p95 dropped less, because the slowest replies are now the ones that wait
+  for a tool call to be written: LLM time, not voice.
+- 12/12 is the LLM's luck, not the GPU's: the 2 hardship calls that failed before were LLM choices. Step 6 checks it.
+- Kokoro takes about 1 GB of VRAM. About 1.5 GB of the 8 GB is still free.
+
 ## When it breaks
 | You see | Why | Fix |
 |---|---|---|
+| `Kokoro voice: ... on CPUExecutionProvider` (FAIL) | onnxruntime couldn't start CUDA and quietly used the CPU | `uv sync` (needs `onnxruntime-gpu`, not `onnxruntime`); `uv pip list` must not show plain `onnxruntime` |
+| `Failed to load ...cublas64_12.dll: [WinError 127]` | Whisper was loaded before Kokoro | Keep Kokoro first in `agent/bot.py` (it is); harmless either way |
 | `No calls measured yet in ...\metrics` | No call finished with the new code | Make a call; one file per call appears in `metrics\` |
 | A column you didn't expect | A setting was still set in PowerShell | `Get-ChildItem Env:LLM, Env:VAD_STOP_SECS`; remove with `Remove-Item Env:...` |
 | 3B numbers look like 7B, or VRAM is 7+ GB | Both models loaded | `ollama ps`; `ollama stop qwen2.5:7b` before the 3B run |
-| One reply of 5+ s with `pipeline` large | Kokoro stalled on the CPU (another program busy) | Look at `QuietKokoroTTS#0 TTFB` in the log; close heavy programs and repeat the run |
+| One reply of 5+ s with `pipeline` large | Kokoro stalled (on the CPU: another program busy) | Look at `QuietKokoroTTS#0 TTFB` in the log; close heavy programs and repeat the run |

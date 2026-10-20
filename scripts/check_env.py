@@ -108,23 +108,29 @@ def check_kokoro():
     from pipecat.services.kokoro.tts import KOKORO_CACHE_DIR, _ensure_model_files
     from kokoro_onnx import Kokoro
 
+    from agent.gpu import onnx_session
+
     model_path = KOKORO_CACHE_DIR / "kokoro-v1.0.onnx"
     voices_path = KOKORO_CACHE_DIR / "voices-v1.0.bin"
     try:
         if not (model_path.exists() and voices_path.exists()):
             print("      downloading Kokoro files (about 340 MB)...", flush=True)
         _ensure_model_files(model_path, voices_path)
-        kokoro = Kokoro(str(model_path), str(voices_path))
+        session = onnx_session(model_path, config.TTS_DEVICE)
+        kokoro = Kokoro.from_session(session, str(voices_path))
         text = "Hello, this is a test call."
+        kokoro.create(text, voice=config.TTS_VOICE, lang="en-us")   # the first run sets up CUDA; time the second
         t0 = time.perf_counter()
         samples, sample_rate = kokoro.create(text, voice=config.TTS_VOICE, lang="en-us")
         synth_ms = (time.perf_counter() - t0) * 1000
     except Exception as e:
         report("Kokoro voice", False, f"{type(e).__name__}: {e}")
         return
-    audio_s = len(samples) / sample_rate
-    report("Kokoro voice", True,
-           f"voice '{config.TTS_VOICE}': {audio_s:.1f}s of speech made in {synth_ms:.0f} ms on CPU")
+    device = session.get_providers()[0]
+    on_wanted = config.TTS_DEVICE != "cuda" or device == "CUDAExecutionProvider"
+    report("Kokoro voice", on_wanted,
+           f"voice '{config.TTS_VOICE}': {len(samples) / sample_rate:.1f}s of speech made in {synth_ms:.0f} ms "
+           f"on {device}" + ("" if on_wanted else ". Wanted CUDA: is onnxruntime-gpu installed (uv sync)?"))
 
 
 def check_turn_taking():
@@ -142,7 +148,8 @@ def check_turn_taking():
 
 def main():
     print(f"Python {sys.version.split()[0]}\n", flush=True)
-    for check in (check_gpu, check_cuda_dlls, check_whisper, check_ollama, check_kokoro, check_turn_taking):
+    # Kokoro before Whisper, as in agent/bot.py: the other order makes onnxruntime fail to load cuBLAS.
+    for check in (check_gpu, check_cuda_dlls, check_kokoro, check_whisper, check_ollama, check_turn_taking):
         check()
     failed = [name for name, ok in results if not ok]
     print("\nAll green." if not failed else f"\n{len(failed)} check(s) failed: {', '.join(failed)}")

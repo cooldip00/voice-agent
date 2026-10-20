@@ -5,8 +5,14 @@ requires-python = ">=3.12"
 dependencies = [
     "nvidia-cublas-cu12>=12.9.2.10",
     "nvidia-cudnn-cu12==9.*",
+    "onnxruntime-gpu[cuda,cudnn]==1.24.4",   # Kokoro on the GPU; the version pipecat 1.12 pins (~=1.24.3)
     "pipecat-ai[kokoro,local-smart-turn,runner,silero,webrtc,whisper]==1.12.0",
 ]
+
+[tool.uv]
+# onnxruntime and onnxruntime-gpu both install the module `onnxruntime`; with both, one overwrites the
+# other. Everything that asks for onnxruntime (pipecat, kokoro-onnx, faster-whisper) gets the GPU build.
+override-dependencies = ["onnxruntime; sys_platform == 'never'"]
 
 [dependency-groups]
 dev = [
