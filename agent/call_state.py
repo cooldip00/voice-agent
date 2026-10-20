@@ -33,6 +33,7 @@ class CallState:
     tool_calls: list[dict] = field(default_factory=list)   # every call, for the end-of-call record and scoring
     llm_slips: list[str] = field(default_factory=list)     # e.g. a tool call written as text; counted in step 5
     silenced: list[str] = field(default_factory=list)      # sentences the LLM wrote that the guards didn't let out
+    caller_turns: list[str] = field(default_factory=list)  # what the caller said, oldest first; set by the bot
 
     @property
     def locked(self) -> bool:
@@ -104,10 +105,20 @@ def check_promise(amount, pay_by: str, today: date, amount_due: int) -> str | No
 WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 
 
+MONTHS = ("january", "february", "march", "april", "may", "june", "july", "august", "september", "october",
+          "november", "december")
+_MONTH = "(" + "|".join(MONTHS) + ")"
+# "the 23rd", "23rd of October", "23 October" (a bare "23" could be anything), "October 23rd"
+_DAY_OF_MONTH = re.compile(rf"\b(\d{{1,2}})(?:(?:st|nd|rd|th)(?:\s+(?:of\s+)?{_MONTH})?|\s+(?:of\s+)?{_MONTH})\b"
+                           rf"|\b{_MONTH}\s+(?:the\s+)?(\d{{1,2}})(?:st|nd|rd|th)?\b")
+
+
 def resolve_day(day, today: date) -> date | None:
-    """The day as the caller said it ("Friday", "tomorrow") -> a date. Code does this, not the LLM: Qwen 7B
-    turned "this Friday" into 2026-10-27, a Tuesday, even with the dates listed in its prompt.
-    A weekday name means the next one after today (1 to 7 days ahead); a YYYY-MM-DD date alone is taken as is."""
+    """The day as the caller said it ("Friday", "tomorrow", "the 23rd") -> a date. Code does this, not the
+    LLM: Qwen 7B turned "this Friday" into 2026-10-27, a Tuesday, even with the dates listed in its prompt.
+    A YYYY-MM-DD date is not accepted: while it was, Qwen passed today's date for "this Friday" in 4 of 20 runs.
+    A weekday means the next one after today (1 to 7 days ahead). A day of the month means the next date with
+    that day: this month or the next, or with a month named, this year or the next."""
     text = str(day).strip().lower()
     words = re.findall(r"[a-z]+", text)
     # The caller's word beats a date next to it: "Friday 2026-10-27" means Friday.
@@ -118,11 +129,39 @@ def resolve_day(day, today: date) -> date | None:
     for word in words:
         if word.capitalize() in WEEKDAYS:
             return today + timedelta(days=(WEEKDAYS.index(word.capitalize()) - today.weekday()) % 7 or 7)
-    return parse_date(text)
+    if not (m := _DAY_OF_MONTH.search(text)):
+        return None
+    number, month = (int(m[1]), m[2] or m[3]) if m[1] else (int(m[5]), m[4])
+    if month:
+        tries = [(today.year, MONTHS.index(month) + 1), (today.year + 1, MONTHS.index(month) + 1)]
+    else:
+        tries = [(today.year, today.month), (today.year + today.month // 12, today.month % 12 + 1)]
+    for year, month_number in tries:
+        try:
+            on = date(year, month_number, number)
+        except ValueError:   # "the 31st" in a 30-day month: not a day the caller can mean
+            return None
+        if on >= today:
+            return on
+    return None
 
 
-MONTHS = ("january", "february", "march", "april", "may", "june", "july", "august", "september", "october",
-          "november", "december")
+def caller_day(caller_turns: list[str], today: date) -> date | None:
+    """The day from the caller's own words, for when the LLM passed a day code can't read: in 3 of 20 runs
+    Qwen 7B passed today's date for "this Friday" and, refused, asked the caller to say it "in a different
+    way" instead of calling the tool again. The newest of the last 3 caller turns that names a day decides
+    ("Yes, that's right." names none, so the turn before it). If that turn names two different days ("not
+    today, maybe Friday"), there is no answer: code doesn't guess."""
+    for turn in reversed(caller_turns[-3:]):
+        text = turn.lower()
+        phrases = [w for w in re.findall(r"[a-z]+", text) if w in ("today", "tomorrow") or w.capitalize() in WEEKDAYS]
+        phrases += [m[0] for m in _DAY_OF_MONTH.finditer(text)]
+        days = {d for p in phrases if (d := resolve_day(p, today))}
+        if days:
+            return days.pop() if len(days) == 1 else None
+    return None
+
+
 _DAY_MONTH_YEAR = re.compile(r"(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?([a-z]+),?\s+(\d{4})")
 _MONTH_DAY_YEAR = re.compile(r"([a-z]+)\s+(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})")
 _NUMERIC = re.compile(r"(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})")

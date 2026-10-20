@@ -158,7 +158,12 @@ class PlayedText(FrameProcessor):
 
 
 class JoinCallerTurns(FrameProcessor):
-    """Between the user aggregator and the LLM: joins back-to-back caller messages before each LLM call."""
+    """Between the user aggregator and the LLM: joins back-to-back caller messages before each LLM call, and
+    keeps the caller's words in the call state, where the tools find the day the caller named."""
+
+    def __init__(self, state: CallState):
+        super().__init__()
+        self.state = state
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -166,6 +171,8 @@ class JoinCallerTurns(FrameProcessor):
             joined = join_caller_turns(frame.context.messages)
             if len(joined) < len(frame.context.messages):
                 frame.context.set_messages(joined)
+            self.state.caller_turns = [m["content"] for m in joined
+                                       if isinstance(m, dict) and m.get("role") == "user" and isinstance(m.get("content"), str)]
         await self.push_frame(frame, direction)
 
 
@@ -291,7 +298,7 @@ async def bot(runner_args: RunnerArguments):
             transport.input(),
             stt,
             aggregators.user(),
-            JoinCallerTurns(),
+            JoinCallerTurns(state),
             llm,
             tts,
             transport.output(),

@@ -6,6 +6,7 @@ import pytest
 from agent.call_state import (
     CallState,
     as_rupees,
+    caller_day,
     check_callback,
     check_outcome,
     call_record,
@@ -212,16 +213,45 @@ def test_no_dates_that_no_tool_gave():
     ("today", "2026-10-20"), ("Tomorrow", "2026-10-21"),
     ("Friday", "2026-10-23"), ("this friday", "2026-10-23"), ("next Friday", "2026-10-23"),
     ("Tuesday", "2026-10-27"),          # today is a Tuesday, so "Tuesday" means next week's
-    ("2026-10-25", "2026-10-25"),
     ("Friday 2026-10-27", "2026-10-23"),   # the caller's word wins over the LLM's date
+    ("the 23rd", "2026-10-23"), ("on the 23rd", "2026-10-23"), ("23rd of October", "2026-10-23"),
+    ("23 October", "2026-10-23"), ("October 23rd", "2026-10-23"), ("the 20th", "2026-10-20"),
+    ("the 5th", "2026-11-05"),          # the 5th has passed this month, so next month's
+    ("January 3rd", "2027-01-03"),      # January has passed this year, so next year's
 ])
 def test_resolve_day(day, expected):
     assert resolve_day(day, TODAY).isoformat() == expected
 
 
-@pytest.mark.parametrize("day", ["someday", "23/10/2026", "", "Fri"])
+@pytest.mark.parametrize("day", ["someday", "23/10/2026", "", "Fri", "23", "the 32nd", "the 31st of November",
+                                 "2026-10-23"])   # no YYYY-MM-DD: the LLM passed today's date for "Friday"
 def test_resolve_day_rejects(day):
     assert resolve_day(day, TODAY) is None
+
+
+@pytest.mark.parametrize("turns, expected", [
+    (["I can pay the full amount this Friday.", "Yes, that's right."], "2026-10-23"),   # the turn before "yes"
+    (["Okay, call her tomorrow at five in the evening."], "2026-10-21"),
+    (["I can pay on the 23rd.", "Sorry, no, Thursday.", "Yes."], "2026-10-22"),          # the newest day wins
+    (["Friday the 23rd is fine."], "2026-10-23"),                                        # two words, one day
+])
+def test_caller_day(turns, expected):
+    assert caller_day(turns, TODAY).isoformat() == expected
+
+
+@pytest.mark.parametrize("turns", [
+    ["Not today, maybe Friday.", "Yes."],         # two days: code doesn't guess
+    ["Yes, that's right."],                       # no day
+    [],
+    ["I can pay this Friday.", "Hmm.", "Okay.", "Yes."],   # older than the last 3 turns
+])
+def test_caller_day_none(turns):
+    assert caller_day(turns, TODAY) is None
+
+
+def test_resolve_day_of_month_across_a_year_end():
+    assert resolve_day("the 2nd", TODAY.replace(month=12)).isoformat() == "2027-01-02"
+    assert resolve_day("the 31st", TODAY.replace(month=11, day=5)) is None   # November has no 31st
 
 
 @pytest.mark.parametrize("text", [

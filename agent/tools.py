@@ -19,6 +19,7 @@ from agent.call_state import (
     OUTCOMES,
     CallState,
     as_rupees,
+    caller_day,
     check_callback,
     check_outcome,
     check_promise,
@@ -119,14 +120,22 @@ class CallTools:
             "last_payment": bank.last_payment(self.conn, self.loan["id"]),
         }
 
+    def _day(self, day, today):
+        """The LLM's day if it is in the caller's words, else the day the caller named (the slip is noted)."""
+        if (on := resolve_day(day, today)) is not None:
+            return on
+        if (on := caller_day(self.state.caller_turns, today)) is not None:
+            self.state.llm_slips.append(f"day not in the caller's words: {day!r}, used the caller's {on.isoformat()}")
+        return on
+
     def record_promise(self, amount, day: str) -> dict:
         if refusal := self._gate():
             return refusal
         today = self.clock().date()
-        pay_by = resolve_day(day, today)
+        pay_by = self._day(day, today)
         if pay_by is None:
             return _refused("invalid_promise", "Nothing recorded; don't read this out. Call record_promise again "
-                                               "with day as the caller said it, like Friday or tomorrow")
+                                               "with day in the caller's words, like Friday, tomorrow or the 23rd")
         if problem := check_promise(amount, pay_by.isoformat(), today, self.loan["amount_due"]):
             return _refused("invalid_promise", problem)
         rupees = as_rupees(amount)
@@ -137,10 +146,10 @@ class CallTools:
     def schedule_callback(self, day: str, time: str) -> dict:
         # No identity needed: whoever answers may ask us to call back, and nothing about the loan is said.
         now = self.clock()
-        on, at = resolve_day(day, now.date()), resolve_time(time)
+        on, at = self._day(day, now.date()), resolve_time(time)
         if on is None or at is None:
             return _refused("invalid_callback", "Nothing scheduled; don't read this out. Call schedule_callback again "
-                                                "with day as the caller said it, like tomorrow, and time like 17:00")
+                                                "with day in the caller's words, like tomorrow, and time like 17:00")
         call_at = f"{on.isoformat()}T{at[0]:02d}:{at[1]:02d}"
         if problem := check_callback(call_at, now):
             return _refused("invalid_callback", problem)
@@ -178,6 +187,9 @@ class CallTools:
         return {"ok": True, "outcome": outcome}
 
 
+# No YYYY-MM-DD: offered one, Qwen 7B passed today's date for "this Friday" in 4 of 20 runs (resolve_day).
+SPOKEN_DAY = "The day as the caller said it: today, tomorrow, a weekday like Friday, or a day of the month like the 23rd"
+
 SCHEMAS = [
     FunctionSchema(
         name="verify_identity",
@@ -197,8 +209,7 @@ SCHEMAS = [
         description="Record the customer's promise to pay an amount by a date (at most 7 days from today).",
         properties={
             "amount": {"type": "integer", "description": "Amount in whole rupees"},
-            "day": {"type": "string", "description": "The day as the caller said it: a weekday like Friday, "
-                                                   "today, tomorrow, or a date as YYYY-MM-DD"},
+            "day": {"type": "string", "description": SPOKEN_DAY},
         },
         required=["amount", "day"],
     ),
@@ -206,8 +217,7 @@ SCHEMAS = [
         name="schedule_callback",
         description="Schedule a call back when the person asks to be called later.",
         properties={
-            "day": {"type": "string", "description": "The day as the caller said it: today, tomorrow, a weekday "
-                                                   "like Friday, or a date as YYYY-MM-DD"},
+            "day": {"type": "string", "description": SPOKEN_DAY},
             "time": {"type": "string", "description": "Time like 17:00 or 5 pm, between 08:00 and 19:00"},
         },
         required=["day", "time"],

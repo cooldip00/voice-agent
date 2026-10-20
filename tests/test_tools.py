@@ -92,15 +92,16 @@ def test_no_tool_takes_a_customer_or_loan_id():
 # --- after verification ------------------------------------------------------------------------
 
 def test_record_promise_saves_to_bank(verified, conn, state):
-    result = verified.record_promise(4500, "2026-10-23")
+    result = verified.record_promise(4500, "the 23rd")
     assert result == {"ok": True, "amount": 4500, "pay_by": "2026-10-23"}
     row = conn.execute("SELECT loan_id, call_id, amount, pay_by FROM promises").fetchone()
     assert tuple(row) == ("PL-1001", "test-call", 4500, "2026-10-23")
     assert state.promise == {"amount": 4500, "pay_by": "2026-10-23"}
 
 
-@pytest.mark.parametrize("amount, day", [(0, "2026-10-23"), (500, "2026-10-23"), (5000, "2026-10-23"),
-                                         (4500, "2026-10-28")])
+@pytest.mark.parametrize("amount, day", [(0, "Friday"), (500, "Friday"), (5000, "Friday"),
+                                         (4500, "the 28th"),        # 8 days away
+                                         (4500, "2026-10-23")])     # the LLM's date, not the caller's words
 def test_invalid_promise_is_refused_and_not_saved(verified, conn, amount, day):
     assert verified.record_promise(amount, day)["error"] == "invalid_promise"
     assert conn.execute("SELECT COUNT(*) FROM promises").fetchone()[0] == 0
@@ -176,6 +177,25 @@ def test_promise_by_weekday_gets_its_date_from_code(verified, state):
     assert state.promise == {"amount": 4500, "pay_by": "2026-10-23"}
 
 
+def test_llm_date_is_replaced_by_the_callers_day(verified, state):
+    # Qwen passed today's date for "this Friday"; the caller's words decide.
+    state.caller_turns = ["Okay, I can pay the full amount this Friday.", "Yes, that's right."]
+    assert verified.record_promise(4500, "2026-10-20")["pay_by"] == "2026-10-23"
+    assert state.llm_slips == ["day not in the caller's words: '2026-10-20', used the caller's 2026-10-23"]
+
+
+def test_llm_date_is_refused_when_the_caller_named_two_days(verified, conn, state):
+    state.caller_turns = ["Not today, maybe Friday.", "Yes."]
+    assert verified.record_promise(4500, "2026-10-20")["error"] == "invalid_promise"
+    assert conn.execute("SELECT COUNT(*) FROM promises").fetchone()[0] == 0
+
+
+def test_callback_day_from_the_callers_words(tools, state):
+    state.caller_turns = ["Call her tomorrow at five in the evening."]
+    assert tools.schedule_callback("2026-10-22", "17:00")["call_at"] == "2026-10-21T17:00"
+
+
 def test_callback_needs_a_day_and_time_it_can_read(tools):
     assert tools.schedule_callback("later", "17:00")["error"] == "invalid_callback"
+    assert tools.schedule_callback("2026-10-21", "17:00")["error"] == "invalid_callback"
     assert tools.schedule_callback("Friday", "evening")["error"] == "invalid_callback"

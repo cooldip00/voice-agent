@@ -78,7 +78,8 @@ Real output (shortened):
 ```
 - `outcome` is end_call's; if the call ended without one, `final_outcome` takes it from what the tools recorded.
 - `ended_by: "caller"` means the caller hung up before end_call.
-- `llm_slips` are sentences the guards stopped (section 4). They are counted in step 5.
+- `llm_slips` are sentences the guards stopped (section 4), plus days code took from the caller's words
+  (`day not in the caller's words: '2026-10-20', used the caller's 2026-10-23`). They are counted in step 5.
 
 The same call is also in the bank: `promises` in `data/bank.db` has the row (step 3, section 4 shows how to look).
 
@@ -99,7 +100,8 @@ The LLM handles language. Code owns facts, dates and the rules. Each line below 
 |---|---|
 | Keeps the debt out of the LLM until the DOB matches: `identity_prompt` + 3 tools, then `verify_identity` swaps in the full prompt and all 7 tools | told Anjali's husband "It's regarding an overdue EMI" while the prompt said not to |
 | Says the amount due and the promise confirmation itself (fixed lines, `SPOKEN_AFTER` in `prompts.py`) | said "due on Wednesday, the 6th of October" for Tuesday 2026-10-06 |
-| Works out dates: the LLM passes `day="Friday"`, `resolve_day` turns it into 2026-10-23 | turned "this Friday" into 2026-10-27 (a Tuesday), even with the dates listed in its prompt |
+| Works out dates: the LLM passes `day="Friday"` or `"the 23rd"`, `resolve_day` turns it into 2026-10-23 | turned "this Friday" into 2026-10-27 (a Tuesday), even with the dates listed in its prompt |
+| Refuses a YYYY-MM-DD `day` and takes the day from the caller's own words instead (`caller_day`): the newest caller turn that names one day | passed today's date for "this Friday" (3 of 20 test runs, 3 of 3 live calls), and once refused, asked the caller to say it "in a different way" instead of retrying |
 | Reads the DOB as said (`resolve_birth_date`: "5th of March 1990", "05/03/1990", ISO) | asked callers to "say it in the format YYYY-MM-DD" instead of calling the tool, when the tool wanted ISO |
 | Reads back first, records on "yes" (prompt step 4) | called `record_promise` 0/10 right after the caller named a day; 9–10/10 after a read-back and "yes" |
 | Joins back-to-back caller messages (`JoinCallerTurns`) | called `verify_identity` 1/10 when a pause split "14th of July." / "1985" into two turns; 10/10 joined |
