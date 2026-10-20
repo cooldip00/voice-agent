@@ -19,6 +19,7 @@ from agent.call_state import (
     OUTCOMES,
     CallState,
     as_rupees,
+    caller_amounts,
     caller_day,
     check_callback,
     check_outcome,
@@ -93,6 +94,7 @@ class CallTools:
                                           "This try was not counted.")
         if dob.isoformat() == self.customer["date_of_birth"]:
             self.state.verified = True
+            self.state.verified_at_turn = len(self.state.caller_turns)
             # The loan comes with the success, so the LLM can't skip get_loan_details and guess the facts.
             return {"ok": True, "verified": True, "loan": self._loan_facts()}
         self.state.verify_attempts += 1
@@ -128,6 +130,20 @@ class CallTools:
             self.state.llm_slips.append(f"day not in the caller's words: {day!r}, used the caller's {on.isoformat()}")
         return on
 
+    def _amount_not_said(self, rupees: int) -> str | None:
+        """Refuse an amount the caller didn't say. Qwen 7B once asked a caller who offered 500 for "4500 on the
+        27th" (the prompt's example amount), heard "No", read it back anyway, got "Yes, please" and recorded
+        it. Unlike the day, the caller's amount isn't used instead: below the minimum it needs a human."""
+        due = self.loan["amount_due"]
+        said = caller_amounts(self.state.caller_turns[self.state.verified_at_turn:], due)
+        if rupees in (said or {due}):
+            return None
+        self.state.llm_slips.append(f"amount not in the caller's words: {rupees}, caller said {sorted(said or [])}")
+        if said is None:
+            return "Nothing recorded; don't read this out. The caller hasn't said an amount: ask how much they can pay"
+        return (f"Nothing recorded; don't read this out. The caller said {' or '.join(map(str, sorted(said)))} "
+                f"rupees, not {rupees}. Never suggest an amount; use theirs")
+
     def record_promise(self, amount, day: str) -> dict:
         if refusal := self._gate():
             return refusal
@@ -139,6 +155,8 @@ class CallTools:
         if problem := check_promise(amount, pay_by.isoformat(), today, self.loan["amount_due"]):
             return _refused("invalid_promise", problem)
         rupees = as_rupees(amount)
+        if problem := self._amount_not_said(rupees):
+            return _refused("invalid_promise", problem)
         bank.add_promise(self.conn, self.loan["id"], self.state.call_id, rupees, pay_by)
         self.state.promise = {"amount": rupees, "pay_by": pay_by.isoformat()}
         return {"ok": True, **self.state.promise}

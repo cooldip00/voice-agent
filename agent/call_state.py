@@ -34,6 +34,7 @@ class CallState:
     llm_slips: list[str] = field(default_factory=list)     # e.g. a tool call written as text; counted in step 5
     silenced: list[str] = field(default_factory=list)      # sentences the LLM wrote that the guards didn't let out
     caller_turns: list[str] = field(default_factory=list)  # what the caller said, oldest first; set by the bot
+    verified_at_turn: int = 0        # len(caller_turns) at verification: amounts before it (a birth year) don't count
 
     @property
     def locked(self) -> bool:
@@ -159,6 +160,56 @@ def caller_day(caller_turns: list[str], today: date) -> date | None:
         days = {d for p in phrases if (d := resolve_day(p, today))}
         if days:
             return days.pop() if len(days) == 1 else None
+    return None
+
+
+_NUMBER_WORDS = {w: i for i, w in enumerate(
+    "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen "
+    "seventeen eighteen nineteen".split())} | {
+    w: 10 * i for i, w in enumerate("twenty thirty forty fifty sixty seventy eighty ninety".split(), start=2)}
+_SCALES = {"hundred": 100, "thousand": 1000, "k": 1000, "lakh": 100_000, "lakhs": 100_000}
+_WHOLE_AMOUNT = re.compile(r"\b(full|whole|entire|total) amount\b|\ball of it\b|\beverything\b")
+
+
+def amounts_said(text: str) -> set[int]:
+    """Rupee amounts in one caller turn, as Whisper writes them: "4500", "4,500", "45 hundred", "5k",
+    "four thousand five hundred". An ordinal ("the 23rd") is a day; anything below 100 is a day, a time or
+    a count, never a promise."""
+    found, total, part, counting = set(), 0.0, 0.0, False
+
+    def end_number():
+        nonlocal total, part, counting
+        value = total + part
+        if counting and value >= 100 and value.is_integer():
+            found.add(int(value))
+        total, part, counting = 0.0, 0.0, False
+
+    for token in re.findall(r"\d+(?:\.\d+)?(?:st|nd|rd|th)?|[a-z]+", text.lower().replace(",", "")):
+        if token[0].isdigit() and not token[-1].isalpha():
+            if part:                      # "500 600": two numbers, not one
+                end_number()
+            part, counting = part + float(token), True
+        elif token in _NUMBER_WORDS:
+            part, counting = part + _NUMBER_WORDS[token], True
+        elif token in _SCALES and counting:
+            if _SCALES[token] == 100:
+                part *= 100
+            else:
+                total, part = total + part * _SCALES[token], 0.0
+        elif not (token == "and" and counting):
+            end_number()
+    end_number()
+    return found
+
+
+def caller_amounts(caller_turns: list[str], amount_due: int) -> set[int] | None:
+    """The amounts the caller named, like caller_day: the newest of the last 3 turns that names one decides
+    ("Yes, please." names none). "The full amount" names the amount due. None: the caller named no amount,
+    e.g. answered "6800 rupees is due, when can you pay?" with only a day."""
+    for turn in reversed(caller_turns[-3:]):
+        said = amounts_said(turn) | ({amount_due} if _WHOLE_AMOUNT.search(turn.lower()) else set())
+        if said:
+            return said
     return None
 
 

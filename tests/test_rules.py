@@ -5,7 +5,9 @@ import pytest
 
 from agent.call_state import (
     CallState,
+    amounts_said,
     as_rupees,
+    caller_amounts,
     caller_day,
     check_callback,
     check_outcome,
@@ -237,6 +239,33 @@ def test_resolve_day_rejects(day):
 ])
 def test_caller_day(turns, expected):
     assert caller_day(turns, TODAY).isoformat() == expected
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("I can only pay 500 rupees this week.", {500}),
+    ("4,500 this Friday", {4500}),
+    ("four thousand five hundred", {4500}),
+    ("forty five hundred", {4500}),
+    ("45 hundred", {4500}),
+    ("5k by Monday", {5000}),
+    ("1.5 lakh", {150_000}),
+    ("two lakh and fifty thousand", {250_000}),
+    ("500, maybe 600", {500, 600}),
+    ("On the 23rd at 5.", set()),      # a day and a time, not amounts
+    ("One moment please.", set()),
+])
+def test_amounts_said(text, expected):
+    assert amounts_said(text) == expected
+
+
+@pytest.mark.parametrize("turns, expected", [
+    (["I can only pay 500 rupees this week.", "No, I really can't pay more.", "Yes, please."], {500}),
+    (["I can pay 2000.", "Sorry, make it 3000.", "Yes."], {3000}),         # the newest amount wins
+    (["I'll pay the full amount on Friday.", "Yes."], {6800}),
+    (["This Friday.", "Yes."], None),                                      # only a day: no amount named
+])
+def test_caller_amounts(turns, expected):
+    assert caller_amounts(turns, 6800) == expected
 
 
 @pytest.mark.parametrize("turns", [

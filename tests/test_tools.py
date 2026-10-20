@@ -190,6 +190,31 @@ def test_llm_date_is_refused_when_the_caller_named_two_days(verified, conn, stat
     assert conn.execute("SELECT COUNT(*) FROM promises").fetchone()[0] == 0
 
 
+def test_amount_the_caller_never_said_is_refused(verified, conn, state):
+    # Step 5, live: the caller offered 500, Qwen read back the prompt's example amount, "Yes, please." recorded it.
+    state.caller_turns = ["I lost my job. I can only pay 2000 rupees this week.",
+                          "No, I really can't pay more than that right now.", "Yes, please."]
+    result = verified.record_promise(4500, "Friday")
+    assert result["error"] == "invalid_promise" and "2000" in result["message"]
+    assert conn.execute("SELECT COUNT(*) FROM promises").fetchone()[0] == 0
+    assert state.llm_slips == ["amount not in the caller's words: 4500, caller said [2000]"]
+    assert verified.record_promise(2000, "Friday")["ok"]
+
+
+def test_a_day_alone_promises_the_amount_due(verified, state):
+    # "4500 rupees is due. When can you pay?" "This Friday." means all of it, and only that.
+    state.caller_turns = ["This Friday.", "Yes."]
+    assert "hasn't said an amount" in verified.record_promise(3000, "Friday")["message"]
+    assert verified.record_promise(4500, "Friday")["ok"]
+
+
+def test_birth_year_is_not_an_amount(tools, state):
+    state.caller_turns = ["Yes, speaking.", "It's the 5th of March, 1990."]
+    assert tools.verify_identity(RAHUL_DOB)["verified"]
+    state.caller_turns += ["Friday is fine.", "Yes."]
+    assert tools.record_promise(4500, "Friday")["ok"]
+
+
 def test_callback_day_from_the_callers_words(tools, state):
     state.caller_turns = ["Call her tomorrow at five in the evening."]
     assert tools.schedule_callback("2026-10-22", "17:00")["call_at"] == "2026-10-21T17:00"
