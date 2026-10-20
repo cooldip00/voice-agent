@@ -1,0 +1,20 @@
+customer = 1
+goal = "Three wrong dates of birth: the bot locks and says nothing about the loan"
+fallback = "Okay. Fine."
+
+[[reply]]
+when = "am i speaking|speaking (with|to)"
+say = "Yes, it's Rahul."
+
+[[reply]]
+when = "date of birth|born|try again|didn't match|does not match|doesn't match"
+say = [
+    "It's the first of January, nineteen ninety.",
+    "Sorry, the second of January, nineteen ninety.",
+    "The third of January, nineteen ninety.",
+]
+
+[expect]
+outcome = ["callback", "no_resolution"]
+verified = false
+verify_attempts = 3

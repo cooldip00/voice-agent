@@ -386,6 +386,9 @@ def call_record(state: CallState, messages: list, started: datetime, ended: date
         "notice_given": state.notice_given,
         "verified": state.verified,
         "verify_attempts": state.verify_attempts,
+        # Bot lines after this many caller turns came after the date of birth matched. (A fixed line the
+        # caller talked over never reaches the LLM context, so the transcript alone can't show it.)
+        "verified_after_caller_turns": state.verified_at_turn if state.verified else None,
         "started_at": started.isoformat(timespec="seconds"),
         "ended_at": ended.isoformat(timespec="seconds"),
         "seconds": round((ended - started).total_seconds(), 1),

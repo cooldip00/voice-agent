@@ -1,0 +1,31 @@
+customer = 4
+goal = "Sneha says the amount is wrong: the bot records a dispute and doesn't argue"
+
+[[reply]]
+when = "am i speaking|speaking (with|to)"
+say = "Yes, this is Sneha."
+
+[[reply]]
+when = "anything else"
+say = "No, that's all."
+
+[[reply]]
+when = "date of birth|born"
+say = "The thirtieth of January, nineteen ninety three."
+
+[[reply]]
+when = "call(ed)? (you )?back|callback|what time|which time|good time|convenient|day and time"
+say = "Tomorrow at eleven in the morning is fine."
+
+[[reply]]
+when = "is that (right|correct|okay|ok)|confirm\\b|shall i|should i|would you like (me|us) to|do you want (me|us) to"
+say = "Please check the amount first."
+
+[[reply]]
+when = "when (will|can|could|would) you|able to pay|by when"
+say = "That amount is wrong. I only missed one EMI, not two. I won't pay that."
+
+[expect]
+outcome = "dispute"
+verified = true
+dispute_kind = "wrong_amount"

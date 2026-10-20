@@ -1,0 +1,35 @@
+customer = 2
+goal = "Priya says she already paid: the bot records a dispute, not a promise"
+
+[[reply]]
+when = "am i speaking|speaking (with|to)"
+say = "Yes, this is Priya."
+
+[[reply]]
+when = "anything else"
+say = "No, that's all."
+
+[[reply]]
+when = "date of birth|born"
+say = "The twenty first of November, nineteen eighty eight."
+
+[[reply]]
+when = "reference|transaction|receipt|details|how did you|which (date|day)|when did you"
+say = "I paid it through the app on the fifth of this month. I don't have the reference with me right now."
+
+[[reply]]
+when = "call(ed)? (you )?back|callback|what time|which time|good time|convenient|day and time"
+say = "Tomorrow at eleven in the morning is fine."
+
+[[reply]]
+when = "is that (right|correct|okay|ok)|confirm\\b|shall i|should i|would you like (me|us) to|do you want (me|us) to"
+say = "Yes, please check my payment."
+
+[[reply]]
+when = "when (will|can|could|would) you|able to pay|by when"
+say = "But I already paid this EMI. I paid it through the app on the fifth."
+
+[expect]
+outcome = "dispute"
+verified = true
+dispute_kind = "already_paid"

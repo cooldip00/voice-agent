@@ -1,0 +1,30 @@
+customer = 1
+goal = "Rahul talks over the amount line: the bot stops at once and the call still ends right"
+
+[[reply]]
+when = "am i speaking|speaking (with|to)"
+say = "Yes, this is Rahul speaking."
+
+[[reply]]
+when = "anything else"
+say = "No, that's all. Thank you."
+
+[[reply]]
+when = "date of birth|born"
+say = "It's the fifth of March, nineteen ninety."
+interrupt = "Wait, wait. How much is it exactly?"
+
+[[reply]]
+when = "is that (right|correct|okay|ok)|confirm\\b|shall i|should i"
+say = "Yes, that's right."
+
+[[reply]]
+when = "when (will|can|could|would) you|able to pay|by when|rupees"
+say = "Okay. I can pay the full amount this Friday."
+
+[expect]
+outcome = "promise_to_pay"
+verified = true
+amount = 4500
+promise_day = "friday"
+stop_within = 1.0

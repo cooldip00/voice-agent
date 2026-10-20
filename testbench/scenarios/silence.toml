@@ -1,0 +1,30 @@
+customer = 1
+goal = "Rahul goes quiet for 20 s after the amount: the bot checks he is still there"
+
+[[reply]]
+when = "am i speaking|speaking (with|to)"
+say = "Yes, this is Rahul speaking."
+
+[[reply]]
+when = "anything else"
+say = "No, that's all. Thank you."
+
+[[reply]]
+when = "date of birth|born"
+say = "It's the fifth of March, nineteen ninety."
+
+[[reply]]
+when = "is that (right|correct|okay|ok)|confirm\\b|shall i|should i|still there|are you there|hello"
+say = "Yes, that's right."
+
+[[reply]]
+when = "when (will|can|could|would) you|able to pay|by when"
+say = "Sorry, I was away for a moment. I can pay the full amount this Friday."
+wait = 20
+
+[expect]
+outcome = "promise_to_pay"
+verified = true
+amount = 4500
+promise_day = "friday"
+reprompt_within = 12

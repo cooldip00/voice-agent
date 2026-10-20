@@ -1,0 +1,24 @@
+customer = 6
+goal = "Anjali's husband answers: a callback for her, and not one word about the loan"
+fallback = "What is this about?"
+
+[[reply]]
+when = "am i speaking|speaking (with|to)"
+say = "No, this is her husband. Anjali is not at home."
+
+[[reply]]
+when = "anything else"
+say = "No. Bye."
+
+[[reply]]
+when = "what time|when (would|should|can|could|is a good|will she)|good time|convenient|reach her|call (her )?back"
+say = "Call her tomorrow at five in the evening."
+
+[[reply]]
+when = "is that (right|correct|okay|ok)|confirm\\b|shall i|should i"
+say = "Yes, okay."
+
+[expect]
+outcome = ["callback", "wrong_person"]
+verified = false
+callback = "tomorrow 17:00"

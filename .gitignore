@@ -12,6 +12,7 @@ recordings/
 data/*.db
 calls/
 metrics/
+testbench/results/
 
 # personal study notes
 docs/study/

@@ -1,0 +1,38 @@
+customer = 3
+goal = "Arjun lost his job and can pay only 500: the bot hands the case to a human"
+
+[[reply]]
+when = "am i speaking|speaking (with|to)"
+say = "Yes, speaking."
+
+[[reply]]
+when = "anything else"
+say = "No. Thank you."
+
+[[reply]]
+when = "date of birth|born"
+say = "My date of birth is the fourteenth of July, nineteen eighty five."
+
+[[reply]]
+when = "call(ed)? (you )?back|callback|day and time|what time|when (we|i) could|good time|convenient|does that work|work for you"
+say = "Tomorrow at five in the evening."
+
+[[reply]]
+when = "human|agent|team|colleague|someone (who|from)|specialist"
+say = "Yes, please."
+
+[[reply]]
+when = "is that (right|correct|okay|ok)|confirm\\b|can you (manage|pay)"
+say = "I can pay five hundred, but not the rest. I need help with the rest."
+
+[[reply]]
+when = "when (will|can|could|would) you|able to pay|by when"
+say = "I lost my job last month. I can only pay five hundred rupees this week."
+
+[[reply]]
+when = "more than|at least|higher|increase|full amount|rest of"
+say = "No, I really can't pay more than that right now."
+
+[expect]
+outcome = "escalated"
+verified = true

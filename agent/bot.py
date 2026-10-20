@@ -234,7 +234,9 @@ async def bot(runner_args: RunnerArguments):
         raise FileNotFoundError(f"{config.BANK_DB} missing; run: uv run python -m scripts.seed_bank")
 
     conn = bank.connect(config.BANK_DB)
-    state = CallState(call_id=f"{started:%Y%m%d-%H%M%S}-c{config.CUSTOMER_ID}", customer_id=config.CUSTOMER_ID)
+    # The test bench names the customer per call (in the WebRTC offer); the browser uses $env:CUSTOMER.
+    customer_id = int((runner_args.body or {}).get("customer", config.CUSTOMER_ID))
+    state = CallState(call_id=f"{started:%Y%m%d-%H%M%S}-c{customer_id}", customer_id=customer_id)
     tools = CallTools(state, conn)
     name = tools.customer["name"]
     logger.info(f"Call {state.call_id} to {name}, LLM {config.LLM_MODEL}")
