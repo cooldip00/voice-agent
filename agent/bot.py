@@ -69,7 +69,8 @@ from agent.call_state import (
     unsafe_to_say,
     within_call_hours,
 )
-from agent.speech import speakable
+from agent.metrics import LatencyLog
+from agent.speech import sentences, speakable
 from agent.tools import IDENTITY_TOOLS, TOOL_NAMES, TOOLS, CallTools
 
 
@@ -117,13 +118,14 @@ class SharedWhisperSTT(WhisperSTTService):
 
 
 class QuietKokoroTTS(KokoroTTSService):
-    """Says nothing for a sentence the guards in to_words blanked out (Kokoro raises an error on "")."""
+    """Says nothing for a sentence the guards in to_words blanked out (Kokoro raises an error on ""), and
+    makes a fixed line one sentence at a time: whole, the 146-character after_verify line took 3 s (once
+    18 s) before the caller heard anything."""
 
     async def run_tts(self, text: str, context_id: str):
-        if not text.strip():
-            return
-        async for frame in super().run_tts(text, context_id):
-            yield frame
+        for sentence in sentences(text):
+            async for frame in super().run_tts(sentence, context_id):
+                yield frame
 
 
 def make_tts() -> KokoroTTSService:
@@ -232,7 +234,8 @@ async def bot(runner_args: RunnerArguments):
     state = CallState(call_id=f"{started:%Y%m%d-%H%M%S}-c{config.CUSTOMER_ID}", customer_id=config.CUSTOMER_ID)
     tools = CallTools(state, conn)
     name = tools.customer["name"]
-    logger.info(f"Call {state.call_id} to {name}")
+    logger.info(f"Call {state.call_id} to {name}, LLM {config.LLM_MODEL}")
+    latency = LatencyLog(state.call_id)
 
     transport = await create_transport(
         runner_args,
@@ -309,6 +312,7 @@ async def bot(runner_args: RunnerArguments):
     worker = PipelineWorker(
         pipeline,
         params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
+        observers=[latency.observer],
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
     register_tools(llm, tools, worker, context, prompts.system_prompt(name, started.date()))
@@ -329,6 +333,7 @@ async def bot(runner_args: RunnerArguments):
         await runner.run()
     finally:
         save_record(call_record(state, context.messages, started, datetime.now()))
+        latency.close()
         conn.close()
 
 

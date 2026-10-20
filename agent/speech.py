@@ -129,6 +129,15 @@ def speakable(text: str, today: date) -> str:
     return text
 
 
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+(?=[A-Za-z])")   # a letter: speakable() lowercases "4500"
+
+
+def sentences(text: str) -> list[str]:
+    """Split spoken text where a sentence ends, so Kokoro can start playing the first one while it makes
+    the next. It only splits on its own past ~510 phonemes: a 146-character fixed line took 3 s to start."""
+    return [s for s in _SENTENCE_END.split(text.strip()) if s]
+
+
 def _parse(text: str) -> date | None:
     try:
         return datetime.strptime(text, "%Y-%m-%d").date()

@@ -12,7 +12,7 @@ STT_COMPUTE_TYPE = "int8_float16"
 
 # Brain (Ollama)
 OLLAMA_BASE = "http://127.0.0.1:11434"  # not "localhost": on Windows it tries IPv6 first and adds ~2 s per request
-LLM_MODEL = "qwen2.5:7b"         # compare with "qwen2.5:3b" in step 5
+LLM_MODEL = os.environ.get("LLM", "qwen2.5:7b")   # step 5 compares: $env:LLM="qwen2.5:3b"
 LLM_MODELS_NEEDED = ["qwen2.5:7b", "qwen2.5:3b"]
 LLM_KEEP_ALIVE = "30m"           # how long Ollama keeps the model in VRAM after the startup warm-up
 LLM_TEMPERATURE = 0.2            # low: steadier tool calls, fewer invented facts (Qwen's default is 0.7)
@@ -21,7 +21,7 @@ LLM_TEMPERATURE = 0.2            # low: steadier tool calls, fewer invented fact
 TTS_VOICE = "af_heart"
 
 # Turn-taking
-VAD_STOP_SECS = 0.2              # Smart Turn works best with a short VAD stop
+VAD_STOP_SECS = float(os.environ.get("VAD_STOP_SECS", "0.2"))   # Smart Turn works best with a short VAD stop
 
 # Fake bank and call rules
 BANK_DB = ROOT / "data" / "bank.db"   # made by: uv run python -m scripts.seed_bank

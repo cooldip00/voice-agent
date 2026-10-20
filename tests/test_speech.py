@@ -2,7 +2,7 @@ from datetime import date
 
 import pytest
 
-from agent.speech import number_words, ordinal_words, speakable, year_words
+from agent.speech import number_words, ordinal_words, sentences, speakable, year_words
 from tests.conftest import TODAY   # Tuesday 2026-10-20
 
 
@@ -56,3 +56,12 @@ def test_bad_date_left_alone():
 
 def test_year_said_only_when_not_this_year():
     assert speakable("2027-01-02", date(2026, 12, 30)) == "Saturday, the second of January, twenty twenty-seven"
+
+
+def test_sentences():
+    assert sentences("Thank you for confirming. four thousand rupees is due. When will you pay?") == [
+        "Thank you for confirming.", "four thousand rupees is due.", "When will you pay?"]
+    assert sentences("  I understand.  ") == ["I understand."]
+    assert sentences("") == []
+    # No break inside "2.5" or before a digit
+    assert sentences("It is Rs. 2.5 lakh.") == ["It is Rs. 2.5 lakh."]

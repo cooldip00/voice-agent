@@ -13,7 +13,7 @@ dev laptop (RTX 3070 Ti Laptop, 8 GB) and the output shown is real.
 | 2 | [02-bot.md](02-bot.md) | `agent.bot`: browser call with interruptions | done |
 | 3 | [03-bank-and-tools.md](03-bank-and-tools.md) | `seed_bank`, `pytest`, the 6 tools by hand | done |
 | 4 | [04-collections-call.md](04-collections-call.md) | Full browser call; end-of-call JSON in `calls/`; the guards | done |
-| 5 | 05-latency.md | `latency_report.py`, 3B vs 7B | next |
+| 5 | [05-latency.md](05-latency.md) | `latency_report.py`: delay per stage, 3B vs 7B, VAD wait | done |
 | 6 | 06-testbench.md | `testbench/run.py`, 8 scenarios | |
 | 7 | 07-ship.md | README, diagram, video | |
 
