@@ -21,7 +21,7 @@ import av
 import numpy as np
 from aiortc import MediaStreamTrack, RTCPeerConnection, RTCSessionDescription
 
-from testbench.scenario import Scenario
+from testbench.scenario import GIVE_UP, Scenario
 
 RATE = 48000
 FRAME = 960            # 20 ms
@@ -205,8 +205,8 @@ async def call(scenario: Scenario, voice: Voice, hearing: Hearing, url: str, wav
                 break
 
         mark = await speak(reply.say)
-        if reply.hang_up:   # the caller gave up; nothing the bot says now changes the result
-            log["caller_gave_up"] = True
+        if reply.hang_up:   # said bye, or gave up; nothing the bot says now changes the result
+            log["caller_gave_up" if reply.say == GIVE_UP else "caller_hung_up"] = True
             break
 
         if reply.interrupt:
@@ -228,7 +228,7 @@ async def call(scenario: Scenario, voice: Voice, hearing: Hearing, url: str, wav
             await asyncio.sleep(max(0.0, cut_in + len(pcm) / RATE - time.time()))
             mark = time.time()
 
-    end = time.time() + (0 if log.get("caller_gave_up") else 15)   # let the goodbye play and the bot hang up
+    end = time.time() + (0 if log.get("caller_gave_up") or log.get("caller_hung_up") else 15)   # let the goodbye play and the bot hang up
     while time.time() < end and not ear.closed and pc.connectionState not in ("closed", "failed"):
         await asyncio.sleep(0.2)
     log["bot_hung_up"] = ear.closed or pc.connectionState in ("closed", "failed")

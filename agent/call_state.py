@@ -298,6 +298,18 @@ _DEBT_WORDS = re.compile(r"\b(loans?|emis?|overdue|payments?|pay|paid|dues?|debt
 _FORMAT_TALK = re.compile(r"\b(yyyy|format)\b", re.IGNORECASE)
 _CLAIM = re.compile(r"\b(recorded|noted|registered|logged|scheduled|escalated|flagged)\b", re.IGNORECASE)
 _NOTICE = re.compile(r"\bcall (is|is being|will be) recorded\b", re.IGNORECASE)
+# In a bench call Qwen spoke a made-up tool result: '"ok": false, "message": "Call ended by user."}'.
+_JSON_TALK = re.compile(r'[{}]|"\w+"\s*:')
+# Hardship goes to a human (fair-practice rule). Qwen 7B bargained instead in 3 of 3 bench calls, so code
+# listens for it. Broad on purpose: a false match hands the case to a person, which is the safe side.
+_HARDSHIP = re.compile(r"\b(lost (my|his|her|our) (job|work|income)|no (job|work|income|salary)|jobless|unemployed|"
+                       r"laid off|salary (is |was |has )?(not|stopped|delayed)|hospital\w*|medical|surgery|"
+                       r"illness|sick|accident|passed away)\b", re.IGNORECASE)
+
+
+def hardship_said(text: str) -> bool:
+    """The caller says they can't pay because of hardship: job loss, illness, a death in the family."""
+    return bool(_HARDSHIP.search(text))
 
 
 def unsafe_to_say(text: str, state: CallState) -> str | None:
@@ -311,6 +323,8 @@ def unsafe_to_say(text: str, state: CallState) -> str | None:
         return "mentions the debt before identity is verified"
     if _FORMAT_TALK.search(text):
         return "asks the caller for a date format"
+    if _JSON_TALK.search(text):
+        return "writes JSON"
     # Dates come from tools; in a test call Qwen offered a hardship caller "next Friday, 2026-10-27" (a Tuesday).
     given = set(_ISO_DATE.findall(json.dumps([c["result"] for c in state.tool_calls])))
     if any(d not in given for d in _ISO_DATE.findall(text)):

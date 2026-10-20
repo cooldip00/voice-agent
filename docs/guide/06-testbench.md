@@ -118,6 +118,43 @@ Mistakes the bench made along the way, now fixed (the study note has the detail)
 broke rules; broad rules (`pay`) caught read-backs; a talked-over line looked like the bot leaking the debt; the
 caller looped on its fallback forever, so it now gives up after the same line 3 times.
 
+## 6. Step 6b: code closes the call
+The three groups above, fixed in code rather than in the prompt:
+
+| File | What changed in step 6b |
+|---|---|
+| `agent/bot.py` | `close_call`: records the outcome, says a fixed line and the goodbye, hangs up. Called when `flag_dispute`, `escalate_to_human` or `schedule_callback` succeeds, and on the identity lock. A caller turn that names hardship is escalated by code before the LLM sees it. 8 s of silence: "Are you still there?", twice, then the call ends |
+| `agent/prompts.py` | The lines code says: `CLOSES_CALL`, `LOCKED`, `STILL_THERE`, `IDLE_END`. The prompt says the system ends the call after those tools |
+| `agent/call_state.py` | `hardship_said` (lost job, illness, a death...). The guard stops text that looks like JSON |
+| `agent/tools.py` | `flag_dispute`, `escalate_to_human`, `schedule_callback` record once per call; a second call returns the first |
+| `agent/config.py` | `USER_IDLE_SECS = 8.0` |
+| `testbench/scenario.py`, `caller.py` | A rule can hang up (`hang_up = true`); the log tells `caller_hung_up` (said bye) from `caller_gave_up` (a loop) |
+| `testbench/scenarios/call_later.toml` | The caller hangs up after "Bye" |
+
+Nothing new to run: `uv run pytest` (270 tests), then the bench as in § 1.
+
+**Results, same setup, `--runs 3`, 27 calls, 29 minutes (results `20261020-155200`):**
+
+| | Step 6 | Step 6b |
+|---|---|---|
+| calls passed | 14 / 27 | **27 / 27** |
+| already_paid, hardship, silence | 0 / 3 each | 3 / 3 each |
+| call_later, dispute, wrong_person, wrongdob | 2 / 3 each | 3 / 3 each |
+| voice to voice p50 / p95 | 1372 / 2395 ms (150 replies) | 1316 / 1783 ms (98 replies) |
+| slowest reply | 4.2 s | 1.9 s |
+| interrupt: bot stopped after | 0.67–0.71 s | 0.65–0.70 s |
+| silence: bot asked after | never | 6.1 s of the caller's quiet (8 s after the bot stopped; the caller counts from 2 s) |
+
+Fewer replies and a faster p95: calls end when their business is done, so the long, slow loops are gone.
+
+What the bench still shows:
+- **Hardship fires on the first sentence.** Smart Turn ended the caller's turn at "I lost my job last month."
+  Code escalated at once, and the bot's closing line talked over "I can only pay five hundred rupees this week".
+  The escalation note for the human lacks the 500. It passed, because the check is "escalated", in 3 of 3.
+- **The LLM still slips; the guards catch it.** In one happy call Qwen said "this Friday, 2026-10-20" (a Tuesday);
+  the date guard silenced it and the call passed.
+- **27/27 is these 9 scenarios.** The hardship words and the closing lines were written with them in view.
+
 ## When it breaks
 | You see | Why | Fix |
 |---|---|---|
@@ -128,3 +165,5 @@ caller looped on its fallback forever, so it now gives up after the same line 3 
 | Caller answers `Sorry, could you say that again?` to a clear question | No rule matched what tiny.en heard (it hears "Asha" as "a shaft") | Look at `heard` in `report.json`; widen the rule's regex |
 | `bot ended the call: caller` | The caller gave up (same line 3 times), or the bot stopped talking without hanging up | Read the turns (§ 3): a loop means the bot didn't end the call |
 | Every reply is slow | Another program is on the GPU, or a second Ollama model is loaded | `ollama ps`; close heavy programs and run again |
+| A browser call ends with "I'm sorry to hear that..." when you only mentioned being ill in passing | `hardship_said` is broad on purpose: a false match hands the case to a person | Expected. Narrow `_HARDSHIP` in `agent/call_state.py` only with a test for the case |
+| The bot asks "Are you still there?" while you think | 8 s of quiet after it spoke | `USER_IDLE_SECS` in `agent/config.py` |

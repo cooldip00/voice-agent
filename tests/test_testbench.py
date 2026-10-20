@@ -94,6 +94,13 @@ def test_the_same_answer_a_third_time_running_and_the_caller_hangs_up():
     assert [r.hang_up for r in replies] == [False, False, True]
 
 
+
+def test_a_rule_can_hang_up():
+    s = scenarios.load(scenarios.SCENARIO_DIR / "call_later.toml")
+    reply = s.reply_to("Is there anything else?")
+    assert reply.say == "No. Bye." and reply.hang_up
+    assert not s.reply_to("Could you tell me your date of birth?").hang_up
+
 def test_a_list_of_answers_is_used_in_turn_then_the_last_repeats():
     s = scenarios.load(scenarios.SCENARIO_DIR / "wrongdob.toml")
     says = [s.reply_to("What is your date of birth?").say for _ in range(4)]

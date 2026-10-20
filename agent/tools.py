@@ -43,7 +43,7 @@ NO_NOTICE = {
 LOCKED = {
     "ok": False,
     "error": "locked",
-    "message": "Too many wrong dates of birth. Do not say why you are calling. Offer a callback, then end the call.",
+    "message": "Too many wrong dates of birth. Do not say why you are calling. The system ends the call.",
 }
 
 
@@ -163,6 +163,8 @@ class CallTools:
 
     def schedule_callback(self, day: str, time: str) -> dict:
         # No identity needed: whoever answers may ask us to call back, and nothing about the loan is said.
+        if self.state.callback:   # once per call: a second call returns the first, no second bank row
+            return {"ok": True, "call_at": self.state.callback}
         now = self.clock()
         on, at = self._day(day, now.date()), resolve_time(time)
         if on is None or at is None:
@@ -179,6 +181,8 @@ class CallTools:
     def flag_dispute(self, kind: str, reason: str) -> dict:
         if refusal := self._gate():
             return refusal
+        if self.state.dispute:   # in a bench call Qwen flagged the same dispute twice: two bank rows
+            return {"ok": True, **self.state.dispute}
         if kind not in DISPUTE_KINDS:
             return _refused("invalid_dispute", f"kind must be one of {', '.join(DISPUTE_KINDS)}")
         reason = (reason or "").strip()[:500]
@@ -191,12 +195,14 @@ class CallTools:
     def escalate_to_human(self, reason: str) -> dict:
         if refusal := self._gate():
             return refusal
+        if self.state.escalation:
+            return {"ok": True, "reason": self.state.escalation}
         reason = (reason or "").strip()[:500]
         if not reason:
             return _refused("invalid_escalation", "give the reason in a few words")
         bank.add_escalation(self.conn, self.loan["id"], self.state.call_id, reason)
         self.state.escalation = reason
-        return {"ok": True, "message": "A human agent will call within two working days. Tell the customer so."}
+        return {"ok": True, "reason": reason}
 
     def end_call(self, outcome: str) -> dict:
         if problem := check_outcome(self.state, outcome):

@@ -13,6 +13,7 @@ from agent.call_state import (
     check_outcome,
     call_record,
     check_promise,
+    hardship_said,
     join_caller_turns,
     parse_date,
     resolve_birth_date,
@@ -320,3 +321,22 @@ def test_back_to_back_caller_turns_are_joined():
     joined = join_caller_turns(messages)
     assert [m["content"] for m in joined] == ["What is your date of birth?", "14th of July. 1985", "Thank you.", "Okay."]
     assert messages[1]["content"] == "14th of July."   # the originals are left alone
+
+
+@pytest.mark.parametrize("text", ["I lost my job last month.", "I'm unemployed right now.", "My salary is delayed.",
+                                  "My father is in the hospital.", "I had an accident.", "I was laid off."])
+def test_hardship_said(text):
+    assert hardship_said(text)
+
+
+@pytest.mark.parametrize("text", ["I'll pay 4500 on Friday.", "I already paid on the 15th.",
+                                  "Call me back tomorrow at five.", "My job keeps me busy, call later."])
+def test_not_hardship(text):
+    assert not hardship_said(text)
+
+
+def test_json_is_not_spoken():
+    # A bench call had Qwen speak a made-up tool result.
+    state = CallState(call_id="t", customer_id=1, verified=True)
+    assert unsafe_to_say('"ok": false, "message": "Call ended by user."}', state) == "writes JSON"
+    assert unsafe_to_say("Okay, I understand.", state) is None

@@ -108,9 +108,9 @@ def test_invalid_promise_is_refused_and_not_saved(verified, conn, amount, day):
 
 
 def test_flag_dispute(verified, conn):
-    assert verified.flag_dispute("already_paid", "  paid on the 15th by UPI  ")["reason"] == "paid on the 15th by UPI"
     assert verified.flag_dispute("lost_job", "x")["error"] == "invalid_dispute"
     assert verified.flag_dispute("other", "   ")["error"] == "invalid_dispute"
+    assert verified.flag_dispute("already_paid", "  paid on the 15th by UPI  ")["reason"] == "paid on the 15th by UPI"
     assert conn.execute("SELECT COUNT(*) FROM disputes").fetchone()[0] == 1
 
 
@@ -122,6 +122,19 @@ def test_escalate_then_end_call(verified, conn, state):
         "PL-1001", "lost his job, can pay 500 this week")
     assert verified.end_call("escalated") == {"ok": True, "outcome": "escalated"}
     assert state.outcome == "escalated"
+
+
+def test_settling_tools_record_once(tools, verified, conn):
+    # In a bench call Qwen flagged the same dispute twice: two bank rows for one call.
+    first = verified.flag_dispute("already_paid", "paid on the 15th")
+    assert verified.flag_dispute("wrong_amount", "something else") == first
+    first = verified.escalate_to_human("lost his job")
+    assert first == {"ok": True, "reason": "lost his job"}
+    assert verified.escalate_to_human("ill") == first
+    first = verified.schedule_callback("tomorrow", "5 pm")
+    assert verified.schedule_callback("Friday", "10 am") == first
+    for table in ("disputes", "escalations", "callbacks"):
+        assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 1, table
 
 
 # --- no identity needed ------------------------------------------------------------------------

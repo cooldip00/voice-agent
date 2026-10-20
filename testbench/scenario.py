@@ -23,6 +23,7 @@ Patterns are TOML strings: write a regex backslash twice ("confirm\\b"), or TOML
     say = ["First answer.", "Second time asked."]   # a list: the next one each time, then the last repeats
     wait = 20                                       # silent this long first (the silence test)
     interrupt = "Wait, how much exactly?"           # said 1.5 s into the bot's next turn (the barge-in test)
+    hang_up = true                                  # the caller hangs up after saying it ("Okay. Bye.")
 
     [expect]
     outcome = "escalated"                           # or a list of acceptable outcomes
@@ -53,6 +54,7 @@ class Rule:
     says: list[str]
     wait: float = 0.0
     interrupt: str | None = None
+    hang_up: bool = False
     used: int = 0
 
 
@@ -77,7 +79,7 @@ class Scenario:
                 rule.used += 1
                 # wait and interrupt happen once: a second "when can you pay?" gets a normal answer
                 first = rule.used == 1
-                reply = Reply(say, rule.wait if first else 0.0, rule.interrupt if first else None)
+                reply = Reply(say, rule.wait if first else 0.0, rule.interrupt if first else None, rule.hang_up)
                 break
         if self.said[-(GIVE_UP_AT - 1):] == [reply.say] * (GIVE_UP_AT - 1):
             reply = Reply(GIVE_UP, hang_up=True)
@@ -90,7 +92,8 @@ def load(path: Path) -> Scenario:
     rules = []
     for r in data.get("reply", []):
         says = r["say"] if isinstance(r["say"], list) else [r["say"]]
-        rules.append(Rule(re.compile(r["when"], re.IGNORECASE), says, float(r.get("wait", 0)), r.get("interrupt")))
+        rules.append(Rule(re.compile(r["when"], re.IGNORECASE), says, float(r.get("wait", 0)), r.get("interrupt"),
+                          bool(r.get("hang_up", False))))
     fallback = data.get("fallback", FALLBACK)
     lines = [s for r in rules for s in r.says] + [r.interrupt for r in rules if r.interrupt] + [fallback, GIVE_UP]
     return Scenario(path.stem, int(data["customer"]), data.get("goal", ""), rules, data.get("expect", {}),

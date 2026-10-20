@@ -16,6 +16,7 @@ dev laptop (RTX 3070 Ti Laptop, 8 GB) and the output shown is real.
 | 5 | [05-latency.md](05-latency.md) | `latency_report.py`: delay per stage, 3B vs 7B, VAD wait | done |
 | 5b | [05-latency.md § 5](05-latency.md#5-step-5b-kokoro-on-the-gpu) | Kokoro on the GPU: `check_env` shows the provider | done |
 | 6 | [06-testbench.md](06-testbench.md) | `testbench/run.py`, 9 scenarios, scored by code | done |
+| 6b | [06-testbench.md § 6](06-testbench.md#6-step-6b-code-closes-the-call) | Code ends the call after settling tools, hardship and silence: 27/27 | done |
 | 7 | 07-ship.md | README, diagram, video | |
 
 ## Rules for every command

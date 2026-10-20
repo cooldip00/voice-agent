@@ -23,6 +23,7 @@ TTS_DEVICE = os.environ.get("TTS_DEVICE", "cuda")   # step 5b: 4-6x faster than 
 
 # Turn-taking
 VAD_STOP_SECS = float(os.environ.get("VAD_STOP_SECS", "0.2"))   # Smart Turn works best with a short VAD stop
+USER_IDLE_SECS = 8.0             # caller quiet this long after the bot spoke: it asks (prompts.STILL_THERE), then hangs up
 
 # Fake bank and call rules
 BANK_DB = ROOT / "data" / "bank.db"   # made by: uv run python -m scripts.seed_bank

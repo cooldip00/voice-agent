@@ -36,6 +36,20 @@ def test_farewell():
         assert not prompts.is_farewell(text), text
 
 
+def test_lines_that_close_the_call():
+    # Said by code before GOODBYE. Not farewells themselves (the guard would stop them once the outcome is
+    # set), nothing about the debt (a callback may be for a third party), and readable aloud.
+    callback = {"ok": True, "call_at": "2026-10-21T17:00"}
+    state = CallState(call_id="t", customer_id=1, tool_calls=[{"name": "schedule_callback", "result": callback}])
+    lines = [line(callback) for _, line in prompts.CLOSES_CALL.values()]
+    for text in lines + [prompts.LOCKED, prompts.IDLE_END, *prompts.STILL_THERE]:
+        assert not prompts.is_farewell(text), text
+        assert unsafe_to_say(text, state) is None, text
+    assert {outcome for outcome, _ in prompts.CLOSES_CALL.values()} == {"callback", "dispute", "escalated"}
+    assert speakable(prompts.after_callback({"call_at": "2026-10-21T17:00"}), TODAY) == (
+        "Thank you. We will call you back Wednesday, the twenty-first of October, at five PM.")
+
+
 def test_identity_prompt_and_tools_say_nothing_about_the_debt():
     # Before the DOB matches the LLM must not know why we call: it can't leak what it doesn't know.
     import json

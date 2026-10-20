@@ -8,6 +8,7 @@ say = "Yes, speaking, but I'm driving right now. Can you call me tomorrow at ele
 [[reply]]
 when = "anything else"
 say = "No. Bye."
+hang_up = true
 
 [[reply]]
 when = "what time|which time|when (would|should|can|could|is a good)|good time|convenient"
@@ -24,6 +25,7 @@ say = "Yes, that's fine."
 [[reply]]
 when = "scheduled|we will call you|we'll call you|call you back"
 say = "Okay, thanks. Bye."
+hang_up = true
 
 [expect]
 outcome = "callback"

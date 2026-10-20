@@ -16,6 +16,7 @@ those models. Silero VAD and Smart Turn are small and keep per-call state, so ea
 import json
 import os
 import time
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
@@ -65,6 +66,7 @@ from agent.call_state import (
     CallState,
     call_record,
     final_outcome,
+    hardship_said,
     join_caller_turns,
     unsafe_to_say,
     within_call_hours,
@@ -164,11 +166,15 @@ class PlayedText(FrameProcessor):
 
 class JoinCallerTurns(FrameProcessor):
     """Between the user aggregator and the LLM: joins back-to-back caller messages before each LLM call, and
-    keeps the caller's words in the call state, where the tools find the day the caller named."""
+    keeps the caller's words in the call state, where the tools find the day the caller named.
 
-    def __init__(self, state: CallState):
+    `takeover` lets code answer a caller turn itself: when it returns True, the frame stops here and the LLM
+    doesn't run."""
+
+    def __init__(self, state: CallState, takeover: Callable[[], Awaitable[bool]] | None = None):
         super().__init__()
         self.state = state
+        self.takeover = takeover
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -178,7 +184,17 @@ class JoinCallerTurns(FrameProcessor):
                 frame.context.set_messages(joined)
             self.state.caller_turns = [m["content"] for m in joined
                                        if isinstance(m, dict) and m.get("role") == "user" and isinstance(m.get("content"), str)]
+            if self.takeover and await self.takeover():
+                return
         await self.push_frame(frame, direction)
+
+
+async def close_call(tools: CallTools, worker: PipelineWorker, outcome: str, line: str) -> None:
+    """Code ends the call: records the outcome as end_call would, says `line` and the goodbye, hangs up."""
+    if tools.state.outcome is not None:   # already closing
+        return
+    tools.call("end_call", {"outcome": outcome})
+    await worker.queue_frames([TTSSpeakFrame(line), TTSSpeakFrame(prompts.GOODBYE), EndFrame()])
 
 
 def register_tools(llm: OLLamaLLMService, tools: CallTools, worker: PipelineWorker,
@@ -193,6 +209,15 @@ def register_tools(llm: OLLamaLLMService, tools: CallTools, worker: PipelineWork
                 # No more LLM: code says the goodbye, then hangs up once it has played.
                 await params.result_callback(result, properties=FunctionCallResultProperties(run_llm=False))
                 await worker.queue_frames([TTSSpeakFrame(prompts.GOODBYE), EndFrame()])
+            elif name in prompts.CLOSES_CALL and result["ok"]:
+                # The call's business is done: code says what happens next and hangs up.
+                outcome, line = prompts.CLOSES_CALL[name]
+                await params.result_callback(result, properties=FunctionCallResultProperties(run_llm=False))
+                await close_call(tools, worker, outcome, line(result))
+            elif name == "verify_identity" and result.get("error") == "locked":
+                # Third wrong date of birth: nothing more can be said to this person.
+                await params.result_callback(result, properties=FunctionCallResultProperties(run_llm=False))
+                await close_call(tools, worker, "no_resolution", prompts.LOCKED)
             elif name == "verify_identity" and "loan" in result:
                 # Only now does the LLM learn why we are calling: the full prompt and all seven tools.
                 # ("loan" is missing when it was already verified; then there is nothing to swap or say.)
@@ -298,15 +323,44 @@ async def bot(runner_args: RunnerArguments):
         context,
         user_params=LLMUserAggregatorParams(
             vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=config.VAD_STOP_SECS)),
+            user_idle_timeout=config.USER_IDLE_SECS,
         ),
     )
+
+    async def hardship_takeover() -> bool:
+        """After the DOB matched, a caller turn that names hardship is escalated by code, not left to the LLM."""
+        if not state.verified or state.outcome is not None or len(state.caller_turns) <= state.verified_at_turn:
+            return False
+        said = state.caller_turns[-1]
+        if not hardship_said(said) or not tools.call("escalate_to_human", {"reason": said})["ok"]:
+            return False
+        logger.info(f"Hardship, escalated by code: {said!r}")
+        await close_call(tools, worker, "escalated", prompts.AFTER_ESCALATION)
+        return True
+
+    idle = {"asked": 0, "turns": 0}
+
+    @aggregators.user().event_handler("on_user_turn_idle")
+    async def on_user_turn_idle(aggregator):
+        """The caller said nothing for USER_IDLE_SECS after the bot spoke: ask, and after the last ask, hang up."""
+        if state.outcome is not None:
+            return
+        if len(state.caller_turns) != idle["turns"]:   # they answered the last ask: start counting again
+            idle["asked"], idle["turns"] = 0, len(state.caller_turns)
+        if idle["asked"] < len(prompts.STILL_THERE):
+            logger.info(f"Caller quiet for {config.USER_IDLE_SECS:.0f}s, asking")
+            await worker.queue_frames([TTSSpeakFrame(prompts.STILL_THERE[idle["asked"]])])
+            idle["asked"] += 1
+        else:
+            logger.info("No answer, ending the call")
+            await close_call(tools, worker, final_outcome(state), prompts.IDLE_END)
 
     pipeline = Pipeline(
         [
             transport.input(),
             stt,
             aggregators.user(),
-            JoinCallerTurns(state),
+            JoinCallerTurns(state, hardship_takeover),
             llm,
             tts,
             transport.output(),
