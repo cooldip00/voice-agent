@@ -204,6 +204,14 @@ class CallTools:
         self.state.escalation = reason
         return {"ok": True, "reason": reason}
 
+    def update_escalation(self, reason: str) -> None:
+        """Code only, not a tool for the LLM: the caller went on after the hardship code escalated on, so the
+        note for the human gets all of it ("I lost my job. I can pay 500 this week.")."""
+        reason = (reason or "").strip()[:500]
+        if self.state.escalation and reason:
+            bank.update_escalation(self.conn, self.state.call_id, reason)
+            self.state.escalation = reason
+
     def end_call(self, outcome: str) -> dict:
         if problem := check_outcome(self.state, outcome):
             return _refused("invalid_outcome", problem)

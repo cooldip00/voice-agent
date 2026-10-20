@@ -155,3 +155,8 @@ def add_escalation(conn: sqlite3.Connection, loan_id: str, call_id: str, reason:
         (loan_id, call_id, reason, _now()),
     )
     conn.commit()
+
+
+def update_escalation(conn: sqlite3.Connection, call_id: str, reason: str) -> None:
+    conn.execute("UPDATE escalations SET reason = ? WHERE call_id = ?", (reason, call_id))
+    conn.commit()

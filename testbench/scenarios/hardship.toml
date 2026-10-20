@@ -35,4 +35,5 @@ say = "No, I really can't pay more than that right now."
 
 [expect]
 outcome = "escalated"
+escalation_note = "500|five hundred"   # the human must hear what the caller can pay
 verified = true

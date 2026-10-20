@@ -147,13 +147,43 @@ Nothing new to run: `uv run pytest` (270 tests), then the bench as in § 1.
 
 Fewer replies and a faster p95: calls end when their business is done, so the long, slow loops are gone.
 
-What the bench still shows:
-- **Hardship fires on the first sentence.** Smart Turn ended the caller's turn at "I lost my job last month."
-  Code escalated at once, and the bot's closing line talked over "I can only pay five hundred rupees this week".
-  The escalation note for the human lacks the 500. It passed, because the check is "escalated", in 3 of 3.
+What the bench still showed:
+- **Hardship fired on the first sentence** (fixed in § 6.1). Smart Turn ended the caller's turn at "I lost my job
+  last month." Code escalated at once, and the bot's closing line talked over "I can only pay five hundred rupees
+  this week". The escalation note for the human lacked the 500. It passed, because the check was "escalated".
 - **The LLM still slips; the guards catch it.** In one happy call Qwen said "this Friday, 2026-10-20" (a Tuesday);
   the date guard silenced it and the call passed.
 - **27/27 is these 9 scenarios.** The hardship words and the closing lines were written with them in view.
+
+### 6.1 Hardship waits for the caller to finish
+Check first, then fix: `hardship.toml` now expects `escalation_note = "500|five hundred"`. On the 6b bot it
+failed 3 of 3 (note: `'I lost my job last month.'`, results `20261020-163914`).
+
+| File | What changed |
+|---|---|
+| `agent/hardship.py` (new) | `HardshipWait`: the first hardship sentence is escalated at once (a hang-up still leaves the case with a human), then the bot waits. If the caller talks on, the wait stops; their joined turn replaces the note. After `HARDSHIP_WAIT_SECS` of quiet, the call closes |
+| `agent/bot.py` | Wires it to the caller's turn start/stop events; a disconnect cancels the pending close |
+| `agent/tools.py`, `agent/bank.py` | `update_escalation`: code only, not a tool the LLM can call |
+| `agent/config.py` | `HARDSHIP_WAIT_SECS = 0.8` |
+| `testbench/score.py`, `scenarios/hardship.toml` | The `escalation_note` check |
+
+`uv run pytest`: 278 tests. Only the hardship call takes the new path: it starts when the caller is verified, no
+outcome is set and `hardship_said` matches. Every other turn pays one regex check.
+
+**Results:**
+
+| | 6b | 6b + wait |
+|---|---|---|
+| hardship | 3 / 3, note without the 500 | 3 / 3, note `'I lost my job last month. I can only pay 500 rupees this week.'` |
+| all 27 calls (`20261020-164649`, at 1.5 s wait) | 27 / 27 | 27 / 27 |
+| the 24 calls without hardship, p50 / p95 | 1337 / 1798 ms | 1317 / 1825 ms (noise) |
+| hardship closing line | 1.2 s, over the caller | 2.4 s at a 1.5 s wait; **1.65–1.72 s at 0.8 s** (`20261020-171906`) |
+| all 100 replies, p50 / p95 (24 calls from the full run + hardship at 0.8 s) | 1316 / 1783 ms | 1309 / 1823 ms |
+| slowest reply | 1.9 s | 1.9 s |
+
+The p95 rise is the hardship closing line, which now waits for the caller on purpose. The caller in the bench
+starts the second sentence 0.31 s after Smart Turn ends the first, so 0.8 s leaves room. A real caller who
+pauses longer than 0.8 s mid-thought is still talked over; their next sentence then never reaches the note.
 
 ## When it breaks
 | You see | Why | Fix |
@@ -166,4 +196,5 @@ What the bench still shows:
 | `bot ended the call: caller` | The caller gave up (same line 3 times), or the bot stopped talking without hanging up | Read the turns (§ 3): a loop means the bot didn't end the call |
 | Every reply is slow | Another program is on the GPU, or a second Ollama model is loaded | `ollama ps`; close heavy programs and run again |
 | A browser call ends with "I'm sorry to hear that..." when you only mentioned being ill in passing | `hardship_said` is broad on purpose: a false match hands the case to a person | Expected. Narrow `_HARDSHIP` in `agent/call_state.py` only with a test for the case |
+| `escalation note: 'I lost my job last month.'` | The caller paused longer than `HARDSHIP_WAIT_SECS` between sentences, so the call closed before the second | Raise `HARDSHIP_WAIT_SECS` in `agent/config.py` (costs that much on the hardship closing line) |
 | The bot asks "Are you still there?" while you think | 8 s of quiet after it spoke | `USER_IDLE_SECS` in `agent/config.py` |

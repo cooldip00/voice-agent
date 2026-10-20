@@ -1,6 +1,7 @@
 """The test bench's own logic: scenario files, the caller's choice of answer, and the scoring. No models."""
 
 import copy
+import re
 from datetime import date
 
 import pytest
@@ -49,6 +50,8 @@ def test_every_scenario_is_runnable(s):
         expected_day(s.expect["promise_day"], TODAY)
     if "callback" in s.expect:
         expected_callback(s.expect["callback"], TODAY)
+    if "escalation_note" in s.expect:
+        re.compile(s.expect["escalation_note"])
 
 
 def test_there_are_nine_scenarios():
@@ -194,6 +197,17 @@ def test_interrupt_and_silence_checks():
     assert failed(score(expect, RECORD, ok, [], ROWS, TODAY)) == set()
     bad = {"interrupt": {"stopped_after": None}, "silence": {"reprompt_after": None}}
     assert failed(score(expect, RECORD, bad, [], ROWS, TODAY)) == {"stops when talked over", "asks after silence"}
+
+
+def test_escalation_note_must_carry_what_the_caller_offered():
+    # A hardship call passed 3/3 while the note for the human said only "I lost my job last month".
+    expect = {"outcome": "escalated", "escalation_note": "500|five hundred"}
+    rows = {**ROWS, "promises": 0, "escalations": 1}
+    record = {**RECORD, "outcome": "escalated", "amount": None, "promise_date": None}
+    half = {**record, "escalation": "I lost my job last month"}
+    assert failed(score(expect, half, {}, [], rows, TODAY)) == {"escalation note"}
+    full = {**record, "escalation": "I lost my job last month. I can only pay five hundred rupees this week."}
+    assert failed(score(expect, full, {}, [], rows, TODAY)) == set()
 
 
 def test_any_of_several_outcomes():

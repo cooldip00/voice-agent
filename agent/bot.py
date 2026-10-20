@@ -66,11 +66,11 @@ from agent.call_state import (
     CallState,
     call_record,
     final_outcome,
-    hardship_said,
     join_caller_turns,
     unsafe_to_say,
     within_call_hours,
 )
+from agent.hardship import HardshipWait
 from agent.metrics import LatencyLog
 from agent.speech import sentences, speakable
 from agent.tools import IDENTITY_TOOLS, TOOL_NAMES, TOOLS, CallTools
@@ -327,16 +327,25 @@ async def bot(runner_args: RunnerArguments):
         ),
     )
 
+    async def close_for_hardship():
+        logger.info(f"Hardship, escalated by code: {state.escalation!r}")
+        await close_call(tools, worker, "escalated", prompts.AFTER_ESCALATION)
+
+    hardship = HardshipWait(tools, close_for_hardship, config.HARDSHIP_WAIT_SECS)
+
     async def hardship_takeover() -> bool:
         """After the DOB matched, a caller turn that names hardship is escalated by code, not left to the LLM."""
-        if not state.verified or state.outcome is not None or len(state.caller_turns) <= state.verified_at_turn:
+        if len(state.caller_turns) <= state.verified_at_turn:
             return False
-        said = state.caller_turns[-1]
-        if not hardship_said(said) or not tools.call("escalate_to_human", {"reason": said})["ok"]:
-            return False
-        logger.info(f"Hardship, escalated by code: {said!r}")
-        await close_call(tools, worker, "escalated", prompts.AFTER_ESCALATION)
-        return True
+        return await hardship.heard(state.caller_turns[-1])
+
+    @aggregators.user().event_handler("on_user_turn_started")
+    async def on_user_turn_started(aggregator, strategy):
+        hardship.caller_started()
+
+    @aggregators.user().event_handler("on_user_turn_stopped")
+    async def on_user_turn_stopped(aggregator, strategy, message):
+        hardship.caller_stopped()
 
     idle = {"asked": 0, "turns": 0}
 
@@ -384,6 +393,7 @@ async def bot(runner_args: RunnerArguments):
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info("Caller disconnected")
+        hardship.cancel()
         await worker.cancel()
 
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)

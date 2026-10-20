@@ -85,6 +85,10 @@ def score(expect: dict, record: dict, caller: dict, reply_secs: list[float], ban
     if "callback" in expect:
         want = expected_callback(expect["callback"], today)
         checks.append(Check("callback", record["callback"] == want, f"{record['callback']}, want {want}"))
+    if "escalation_note" in expect:
+        note = record["escalation"] or ""
+        checks.append(Check("escalation note", bool(re.search(expect["escalation_note"], note, re.IGNORECASE)),
+                            f"{note!r}, want /{expect['escalation_note']}/"))
     if "dispute_kind" in expect:
         kind = (record["dispute"] or {}).get("kind")
         checks.append(Check("dispute kind", kind == expect["dispute_kind"], f"{kind}, want {expect['dispute_kind']}"))
