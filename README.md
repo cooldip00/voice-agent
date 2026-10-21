@@ -143,6 +143,9 @@ uv run python -m scripts.check_env        # GPU, CUDA DLLs, Ollama, models: all 
 uv run python -m scripts.seed_bank        # fake bank: 6 customers, one per scenario
 uv run python -m agent.bot                # open http://localhost:7860, allow the mic, Connect
 ```
+The browser calls customer 1 (Rahul Sharma, date of birth 5 March 1990). To call someone else, set `$env:CUSTOMER`
+before starting the bot; the six customers are in [agent/bank.py](agent/bank.py), e.g. `$env:CUSTOMER=3` is Arjun
+Mehta, who lost his job. Outside 08:00–19:00 the bot refuses to call; for a dev test, set `$env:ALLOW_ANY_HOUR=1`.
 ```powershell
 uv run pytest                             # 278 tests, no GPU or models needed
 uv run python -m testbench.run --runs 3   # the 27 calls, about 30 minutes
