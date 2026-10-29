@@ -2,8 +2,10 @@ import json
 
 import pytest
 
+from agent import bank
+from agent.call_state import CallState
 from agent.tools import SCHEMAS, TOOL_NAMES, CallTools
-from tests.conftest import RAHUL_DOB
+from tests.conftest import RAHUL_DOB, TODAY
 
 LOAN_FIELDS = ("amount_due", "emi", "due_date", "product", "last_payment", "4500", "PL-1001")
 
@@ -237,3 +239,69 @@ def test_callback_needs_a_day_and_time_it_can_read(tools):
     assert tools.schedule_callback("later", "17:00")["error"] == "invalid_callback"
     assert tools.schedule_callback("2026-10-21", "17:00")["error"] == "invalid_callback"
     assert tools.schedule_callback("Friday", "evening")["error"] == "invalid_callback"
+
+
+# --- regressions -------------------------------------------------------------------------------
+
+def test_days_before_the_dob_matched_are_not_the_callers_day(tools, state, conn):
+    state.caller_turns = ["Tomorrow works, I think.", "5th of March, 1990."]
+    assert tools.verify_identity(RAHUL_DOB)["verified"]
+    state.caller_turns += ["Yes."]
+    assert tools.record_promise(4500, "2026-10-23")["error"] == "invalid_promise"
+    assert conn.execute("SELECT COUNT(*) FROM promises").fetchone()[0] == 0
+
+
+def test_no_tool_runs_after_the_call_ended(verified, state, conn):
+    assert verified.call("end_call", {"outcome": "no_resolution"})["ok"]
+    assert verified.call("end_call", {"outcome": "refused"})["error"] == "call_ended"
+    assert verified.call("record_promise", {"amount": 4500, "day": "Friday"})["error"] == "call_ended"
+    assert state.outcome == "no_resolution"
+    assert conn.execute("SELECT COUNT(*) FROM promises").fetchone()[0] == 0
+
+
+def test_end_call_cannot_hide_a_recorded_dispute(verified):
+    assert verified.flag_dispute("already_paid", "paid on the 15th")["ok"]
+    assert verified.end_call("no_resolution")["error"] == "invalid_outcome"
+    assert verified.end_call("dispute")["ok"]
+
+
+def test_a_changed_promise_updates_the_one_row(verified, state, conn):
+    state.caller_turns = ["I can pay 4500 on Friday.", "Actually, make it Saturday."]
+    assert verified.record_promise(4500, "Friday")["pay_by"] == "2026-10-23"
+    assert verified.record_promise(4500, "Saturday") == {"ok": True, "amount": 4500, "pay_by": "2026-10-24"}
+    assert [tuple(r) for r in conn.execute("SELECT amount, pay_by FROM promises")] == [(4500, "2026-10-24")]
+
+
+@pytest.mark.parametrize("name, args", [
+    ("flag_dispute", {"kind": "other", "reason": ["paid", "already"]}),
+    ("flag_dispute", {"kind": "other", "reason": None}),
+    ("escalate_to_human", {"reason": 42}),
+])
+def test_reason_that_is_not_text_is_refused_not_a_crash(verified, name, args):
+    assert verified.call(name, args)["error"].startswith("invalid_")
+
+
+def test_callback_same_weekday_next_week(tools):
+    # Tuesday 11:00 -> next Tuesday 17:00: 7 days, allowed.
+    assert tools.schedule_callback("Tuesday", "5 pm") == {"ok": True, "call_at": "2026-10-27T17:00"}
+
+
+def test_callback_at_seven_pm_says_before_19(tools):
+    assert "before 19:00" in tools.schedule_callback("tomorrow", "7 pm")["message"]
+
+
+def test_open_closes_the_bank_when_the_customer_is_unknown(tmp_path):
+    # Left open, the connection locks bank.db on Windows: the bench's reseed (bank.create) can't delete it.
+    path = tmp_path / "bank.db"
+    bank.create(path, TODAY).close()
+    with pytest.raises(ValueError):
+        CallTools.open(CallState(call_id="c", customer_id=999), path)
+    bank.create(path, TODAY).close()
+
+
+def test_open_finds_a_known_customer(tmp_path):
+    path = tmp_path / "bank.db"
+    bank.create(path, TODAY).close()
+    tools = CallTools.open(CallState(call_id="c", customer_id=1), path)
+    assert tools.customer["date_of_birth"] == RAHUL_DOB
+    tools.conn.close()

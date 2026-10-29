@@ -103,6 +103,7 @@ async def run(names: list[str], runs: int, url: str, out: Path) -> list[dict]:
             if record is None:
                 print(f"FAIL  {s.name}-{r}: no call record (did the bot crash? see bot.log)", flush=True)
                 results.append({"scenario": s.name, "run": r, "passed": False, "checks": [], "caller": log})
+                save_report(out, results)
                 continue
             secs = reply_secs(record["call_id"])
             checks = score(s.expect, record, log, secs, bank_rows(record["call_id"]), date.today())
@@ -111,7 +112,15 @@ async def run(names: list[str], runs: int, url: str, out: Path) -> list[dict]:
             print(f"{'PASS' if passed else 'FAIL'}  {s.name}-{r:<3} {record['outcome']:15s} {failed}", flush=True)
             results.append({"scenario": s.name, "run": r, "call_id": record["call_id"], "passed": passed,
                             "checks": [c.__dict__ for c in checks], "reply_secs": secs, "caller": log})
+            save_report(out, results)
     return results
+
+
+def save_report(out: Path, results: list[dict]) -> None:
+    """After every call, so a run stopped halfway (Ctrl+C, a crash) still leaves what it scored."""
+    setup = {"llm": config.LLM_MODEL, "stt": config.STT_MODEL, "vad_stop_secs": config.VAD_STOP_SECS,
+             "tts_device": config.TTS_DEVICE}
+    (out / "report.json").write_text(json.dumps({"setup": setup, "results": results}, indent=2), encoding="utf-8")
 
 
 def summary(results: list[dict]) -> list[str]:
@@ -154,9 +163,7 @@ def main() -> None:
         if bot:
             bot.terminate()
             bot.wait(timeout=30)
-    setup = {"llm": config.LLM_MODEL, "stt": config.STT_MODEL, "vad_stop_secs": config.VAD_STOP_SECS,
-             "tts_device": config.TTS_DEVICE}
-    (out / "report.json").write_text(json.dumps({"setup": setup, "results": results}, indent=2), encoding="utf-8")
+    save_report(out, results)
     print("\n".join(summary(results)))
     print(f"\nSaved in {out}")
 

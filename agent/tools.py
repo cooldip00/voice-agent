@@ -8,6 +8,7 @@ never contains loan data. The bot (agent/bot.py) registers each one with the LLM
 
 import sqlite3
 from datetime import datetime
+from pathlib import Path
 from typing import Callable
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
@@ -45,10 +46,20 @@ LOCKED = {
     "error": "locked",
     "message": "Too many wrong dates of birth. Do not say why you are calling. The system ends the call.",
 }
+CALL_ENDED = {
+    "ok": False,
+    "error": "call_ended",
+    "message": "The call is ending. Say nothing more.",
+}
 
 
 def _refused(error: str, message: str) -> dict:
     return {"ok": False, "error": error, "message": message}
+
+
+def _reason(text) -> str:
+    """The LLM's free text, trimmed. Not a string (Qwen may send a list or null) counts as none given."""
+    return text.strip()[:500] if isinstance(text, str) else ""
 
 
 class CallTools:
@@ -61,11 +72,26 @@ class CallTools:
         if self.customer is None or self.loan is None:
             raise ValueError(f"no customer or loan with id {state.customer_id}")
 
+    @classmethod
+    def open(cls, state: CallState, db_path: Path) -> "CallTools":
+        """Connects to the bank for one call. If the customer isn't there, the connection is closed again:
+        left open, it locks bank.db on Windows and the test bench can't reseed it."""
+        conn = bank.connect(db_path)
+        try:
+            return cls(state, conn)
+        except Exception:
+            conn.close()
+            raise
+
     def call(self, name: str, arguments: dict) -> dict:
         """Run a tool by name, as the LLM asked. Bad names or arguments become refusals, not crashes."""
         handler = getattr(self, name, None) if name in TOOL_NAMES else None
         if handler is None:
             result = _refused("unknown_tool", f"There is no tool called {name}.")
+        elif self.state.outcome is not None:
+            # end_call ran (or code closed the call): a second end_call or a late promise would change the
+            # outcome or add a bank row after the goodbye.
+            result = CALL_ENDED
         else:
             try:
                 result = handler(**(arguments or {}))
@@ -123,10 +149,11 @@ class CallTools:
         }
 
     def _day(self, day, today):
-        """The LLM's day if it is in the caller's words, else the day the caller named (the slip is noted)."""
+        """The LLM's day if it is in the caller's words, else the day the caller named (the slip is noted).
+        Not from turns up to the date of birth: "the 5th of March" there is a birthday."""
         if (on := resolve_day(day, today)) is not None:
             return on
-        if (on := caller_day(self.state.caller_turns, today)) is not None:
+        if (on := caller_day(self.state.caller_turns[self.state.verified_at_turn:], today)) is not None:
             self.state.llm_slips.append(f"day not in the caller's words: {day!r}, used the caller's {on.isoformat()}")
         return on
 
@@ -157,7 +184,10 @@ class CallTools:
         rupees = as_rupees(amount)
         if problem := self._amount_not_said(rupees):
             return _refused("invalid_promise", problem)
-        bank.add_promise(self.conn, self.loan["id"], self.state.call_id, rupees, pay_by)
+        if self.state.promise:   # the caller changed their mind ("make it Saturday"): one promise per call
+            bank.update_promise(self.conn, self.state.call_id, rupees, pay_by)
+        else:
+            bank.add_promise(self.conn, self.loan["id"], self.state.call_id, rupees, pay_by)
         self.state.promise = {"amount": rupees, "pay_by": pay_by.isoformat()}
         return {"ok": True, **self.state.promise}
 
@@ -185,7 +215,7 @@ class CallTools:
             return {"ok": True, **self.state.dispute}
         if kind not in DISPUTE_KINDS:
             return _refused("invalid_dispute", f"kind must be one of {', '.join(DISPUTE_KINDS)}")
-        reason = (reason or "").strip()[:500]
+        reason = _reason(reason)
         if not reason:
             return _refused("invalid_dispute", "give the caller's reason in a few words")
         bank.add_dispute(self.conn, self.loan["id"], self.state.call_id, kind, reason)
@@ -197,7 +227,7 @@ class CallTools:
             return refusal
         if self.state.escalation:
             return {"ok": True, "reason": self.state.escalation}
-        reason = (reason or "").strip()[:500]
+        reason = _reason(reason)
         if not reason:
             return _refused("invalid_escalation", "give the reason in a few words")
         bank.add_escalation(self.conn, self.loan["id"], self.state.call_id, reason)
@@ -207,7 +237,7 @@ class CallTools:
     def update_escalation(self, reason: str) -> None:
         """Code only, not a tool for the LLM: the caller went on after the hardship code escalated on, so the
         note for the human gets all of it ("I lost my job. I can pay 500 this week.")."""
-        reason = (reason or "").strip()[:500]
+        reason = _reason(reason)
         if self.state.escalation and reason:
             bank.update_escalation(self.conn, self.state.call_id, reason)
             self.state.escalation = reason
@@ -250,7 +280,7 @@ SCHEMAS = [
         description="Schedule a call back when the person asks to be called later.",
         properties={
             "day": {"type": "string", "description": SPOKEN_DAY},
-            "time": {"type": "string", "description": "Time like 17:00 or 5 pm, between 08:00 and 19:00"},
+            "time": {"type": "string", "description": "Time like 17:00 or 5 pm, from 08:00 and before 19:00"},
         },
         required=["day", "time"],
     ),

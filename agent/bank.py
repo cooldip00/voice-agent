@@ -133,6 +133,11 @@ def add_promise(conn: sqlite3.Connection, loan_id: str, call_id: str, amount: in
     conn.commit()
 
 
+def update_promise(conn: sqlite3.Connection, call_id: str, amount: int, pay_by: date) -> None:
+    conn.execute("UPDATE promises SET amount = ?, pay_by = ? WHERE call_id = ?", (amount, pay_by.isoformat(), call_id))
+    conn.commit()
+
+
 def add_callback(conn: sqlite3.Connection, customer_id: int, call_id: str, call_at: datetime) -> None:
     conn.execute(
         "INSERT INTO callbacks (customer_id, call_id, call_at, created_at) VALUES (?, ?, ?, ?)",

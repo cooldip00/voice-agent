@@ -1,4 +1,4 @@
-"""The collections call. Browser mic -> VAD + Smart Turn -> Whisper -> Qwen (+ tools) -> Kokoro -> browser speaker.
+"""The collections call. Browser mic -> Whisper -> VAD + Smart Turn (end of turn?) -> Qwen (+ tools) -> Kokoro -> browser speaker.
 
 Run:  uv run python -m agent.bot      then open http://localhost:7860
       $env:CUSTOMER=3                  to call another customer (default 1, Rahul)
@@ -61,7 +61,6 @@ from pipecat.services.whisper.stt import WhisperSTTService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.workers.runner import WorkerRunner
 
-from agent import bank
 from agent.call_state import (
     CallState,
     call_record,
@@ -205,7 +204,10 @@ def register_tools(llm: OLLamaLLMService, tools: CallTools, worker: PipelineWork
             t = time.perf_counter()
             result = tools.call(name, arguments)
             logger.info(f"Tool {name}({arguments}) -> {result} [{(time.perf_counter() - t) * 1000:.0f} ms]")
-            if name == "end_call" and result["ok"]:
+            if result.get("error") == "call_ended":
+                # The goodbye is queued: the LLM gets no new turn to speak over it.
+                await params.result_callback(result, properties=FunctionCallResultProperties(run_llm=False))
+            elif name == "end_call" and result["ok"]:
                 # No more LLM: code says the goodbye, then hangs up once it has played.
                 await params.result_callback(result, properties=FunctionCallResultProperties(run_llm=False))
                 await worker.queue_frames([TTSSpeakFrame(prompts.GOODBYE), EndFrame()])
@@ -258,11 +260,10 @@ async def bot(runner_args: RunnerArguments):
     if not config.BANK_DB.exists():
         raise FileNotFoundError(f"{config.BANK_DB} missing; run: uv run python -m scripts.seed_bank")
 
-    conn = bank.connect(config.BANK_DB)
     # The test bench names the customer per call (in the WebRTC offer); the browser uses $env:CUSTOMER.
     customer_id = int((runner_args.body or {}).get("customer", config.CUSTOMER_ID))
     state = CallState(call_id=f"{started:%Y%m%d-%H%M%S}-c{customer_id}", customer_id=customer_id)
-    tools = CallTools(state, conn)
+    tools = CallTools.open(state, config.BANK_DB)
     name = tools.customer["name"]
     logger.info(f"Call {state.call_id} to {name}, LLM {config.LLM_MODEL}")
     latency = LatencyLog(state.call_id)
@@ -288,7 +289,7 @@ async def bot(runner_args: RunnerArguments):
     async def to_words(text: str, aggregation_type) -> str:  # only what is spoken; the context keeps digits
         nonlocal explained
         # Qwen sometimes writes a tool call as plain text; Ollama only parses its <tool_call> format.
-        problem = "writes a tool call as text" if any(t in text for t in TOOL_NAMES) else unsafe_to_say(text, state)
+        problem = "writes a tool call as text" if any(t in text for t in TOOL_NAMES) else unsafe_to_say(text, state, started.date())
         if problem:
             # Silenced; PlayedText keeps it out of the context. Counted for step 5.
             logger.warning(f"Not speaking, LLM {problem}: {text!r}")
@@ -401,9 +402,11 @@ async def bot(runner_args: RunnerArguments):
     try:
         await runner.run()
     finally:
-        save_record(call_record(state, context.messages, started, datetime.now()))
+        # The bank first: the test bench waits for the record, then deletes bank.db for the next call,
+        # which Windows refuses while this connection is open.
+        tools.conn.close()
         latency.close()
-        conn.close()
+        save_record(call_record(state, context.messages, started, datetime.now()))
 
 
 if __name__ == "__main__":

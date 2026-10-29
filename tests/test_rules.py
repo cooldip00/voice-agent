@@ -90,8 +90,8 @@ def test_callback_ok(when):
     [
         ("2026-10-20T10:00", "past"),
         ("2026-10-20T11:00", "past"),          # exactly now
-        ("2026-10-20T19:00", "between"),
-        ("2026-10-21T07:30", "between"),
+        ("2026-10-20T19:00", "before 19:00"),
+        ("2026-10-21T07:30", "from 8:00"),
         ("2026-10-28T10:00", "within 7 days"),
         ("tomorrow at 5", "YYYY-MM-DDTHH:MM"),
     ],
@@ -340,3 +340,73 @@ def test_json_is_not_spoken():
     state = CallState(call_id="t", customer_id=1, verified=True)
     assert unsafe_to_say('"ok": false, "message": "Call ended by user."}', state) == "writes JSON"
     assert unsafe_to_say("Okay, I understand.", state) is None
+
+
+# --- regressions -------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("text, expected", [
+    ("the day after tomorrow", TODAY + timedelta(days=2)),   # not tomorrow
+    ("a week from today", TODAY + timedelta(days=7)),        # not today
+    ("in a week", TODAY + timedelta(days=7)),
+    ("the 5th may work", TODAY.replace(month=11, day=5)),    # "may" the verb, not the month
+    ("the 5th of May", TODAY.replace(year=2027, month=5, day=5)),
+    ("May 5th", TODAY.replace(year=2027, month=5, day=5)),
+])
+def test_resolve_day_regressions(text, expected):
+    assert resolve_day(text, TODAY) == expected
+
+
+def test_two_days_are_no_answer_even_with_today():
+    assert resolve_day("not today, maybe Friday", TODAY) is None
+    assert caller_day(["Not today, maybe Friday."], TODAY) is None
+
+
+def test_a_date_with_a_year_is_not_a_day():
+    # "the 5th of March, 1990" is a date of birth, not a day to pay on.
+    assert resolve_day("the 5th of March, 1990", TODAY) is None
+    assert caller_day(["Friday.", "It's the 5th of March, 1990."], TODAY) == TODAY + timedelta(days=3)
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("I can't pay 4500, only 2000.", {2000}),
+    ("I don't have 4500 but I can pay 2000.", {2000}),
+    ("I can pay 4500, not 5000.", {4500}),
+    ("I can't pay more than 2000.", {2000}),
+    ("On the 5th of November, 2026 I'll pay 3000.", {3000}),   # 2026 is a year
+    ("I may pay 2000 on Friday.", {2000}),                     # "may" isn't the month
+])
+def test_amounts_turned_down_or_years_are_not_named(text, expected):
+    assert amounts_said(text) == expected
+
+
+def test_callback_window_counts_days():
+    # Asked Tuesday 11:00: next Tuesday 17:00 is 7 days away, as for a promise.
+    assert check_callback("2026-10-27T17:00", NOW) is None
+    assert "within 7 days" in check_callback("2026-10-28T09:00", NOW)
+
+
+def test_seven_pm_is_refused_with_words_that_say_why():
+    assert resolve_time("7") == (19, 0)
+    problem = check_callback("2026-10-21T19:00", NOW)
+    assert "before 19:00" in problem and "between" not in problem
+
+
+def test_no_resolution_or_refused_after_something_was_recorded():
+    state = CallState(call_id="t", customer_id=1, verified=True, promise={"amount": 4500, "pay_by": "2026-10-23"})
+    for outcome in ("no_resolution", "refused"):
+        assert "promise_to_pay" in check_outcome(state, outcome)
+    assert check_outcome(state, "promise_to_pay") is None
+
+
+@pytest.mark.parametrize("text", ["My father died last week.", "I was fired.", "There was a death in the family.",
+                                  "I've been at a funeral."])
+def test_hardship_said_regressions(text):
+    assert hardship_said(text)
+
+
+def test_today_may_be_said():
+    # The prompt gives the LLM today's date; saying it is not inventing one.
+    state = CallState(call_id="t", customer_id=1, verified=True)
+    assert unsafe_to_say("Today is 2026-10-20.", state, TODAY) is None
+    assert unsafe_to_say("Today is 2026-10-20.", state) == "states a date no tool gave"
+    assert unsafe_to_say("Pay by 2026-10-27.", state, TODAY) == "states a date no tool gave"

@@ -10,7 +10,7 @@ Code: [testbench/run.py](../../testbench/run.py), [testbench/caller.py](../../te
 |---|---|
 | `testbench/run.py` | New. Starts the bot, reseeds the bank before each call, places the calls, scores them, prints a table, saves `testbench/results/<time>/` |
 | `testbench/caller.py` | New. The caller: WebRTC like the browser, Kokoro `am_michael` to speak, Whisper `tiny.en` to listen, both on the CPU. Times interrupts and silence |
-| `testbench/scenario.py` | New. Reads a scenario file; picks the caller's answer to each bot turn; hangs up after saying the same line 3 times running |
+| `testbench/scenario.py` | New. Reads a scenario file; picks the caller's answer to each bot turn; says the same line at most twice running; instead of a third time it gives up and hangs up |
 | `testbench/score.py` | New. The checks: outcome, amount, dates, no debt talk before the date of birth matched, no threats, replies under 5 s, bot ended the call, bank matches the record |
 | `testbench/scenarios/*.toml` | New. 9 scenarios: who is called, how the caller answers, what the call must end with |
 | `agent/bot.py` | The customer comes from the browser's offer (`request_data: {"customer": N}`); the call id ends in `-c<customer>` |
@@ -48,7 +48,8 @@ A line reads: scenario-run, the outcome the bot recorded, then every failed chec
 
 ## 3. What it saves
 `testbench\results\<date-time>\` (gitignored):
-- `report.json`: the setup (LLM, Whisper, VAD wait, Kokoro device), and per call the checks, reply times and
+- `report.json`, rewritten after every call (a run stopped halfway keeps what it scored): the setup (LLM,
+  Whisper, VAD wait, Kokoro device), and per call the checks, reply times and
   the caller's log: what it heard, what it said, interrupt and silence timings, whether it gave up.
 - `<scenario>-<run>.wav`: both sides on one track. **Listen to every failed call** before blaming the bot.
 - `bot.log`: the bot's own log for the whole run.
@@ -116,7 +117,7 @@ Every failure is the bot's, in three groups (the fixes are step 6b):
 
 Mistakes the bench made along the way, now fixed (the study note has the detail): a TOML `"\b"` read as a backspace
 broke rules; broad rules (`pay`) caught read-backs; a talked-over line looked like the bot leaking the debt; the
-caller looped on its fallback forever, so it now gives up after the same line 3 times.
+caller looped on its fallback forever, so it now says a line at most twice running, then gives up.
 
 ## 6. Step 6b: code closes the call
 The three groups above, fixed in code rather than in the prompt:
@@ -126,7 +127,7 @@ The three groups above, fixed in code rather than in the prompt:
 | `agent/bot.py` | `close_call`: records the outcome, says a fixed line and the goodbye, hangs up. Called when `flag_dispute`, `escalate_to_human` or `schedule_callback` succeeds, and on the identity lock. A caller turn that names hardship is escalated by code before the LLM sees it. 8 s of silence: "Are you still there?", twice, then the call ends |
 | `agent/prompts.py` | The lines code says: `CLOSES_CALL`, `LOCKED`, `STILL_THERE`, `IDLE_END`. The prompt says the system ends the call after those tools |
 | `agent/call_state.py` | `hardship_said` (lost job, illness, a death...). The guard stops text that looks like JSON |
-| `agent/tools.py` | `flag_dispute`, `escalate_to_human`, `schedule_callback` record once per call; a second call returns the first |
+| `agent/tools.py` | `flag_dispute`, `escalate_to_human`, `schedule_callback` record once per call; a second call returns the first. (Later: a second `record_promise` updates the one promise row, and once the outcome is set every tool is refused with `call_ended`) |
 | `agent/config.py` | `USER_IDLE_SECS = 8.0` |
 | `testbench/scenario.py`, `caller.py` | A rule can hang up (`hang_up = true`); the log tells `caller_hung_up` (said bye) from `caller_gave_up` (a loop) |
 | `testbench/scenarios/call_later.toml` | The caller hangs up after "Bye" |
@@ -143,7 +144,7 @@ Nothing new to run: `uv run pytest` (270 tests), then the bench as in § 1.
 | voice to voice p50 / p95 | 1372 / 2395 ms (150 replies) | 1316 / 1783 ms (98 replies) |
 | slowest reply | 4.2 s | 1.9 s |
 | interrupt: bot stopped after | 0.67–0.71 s | 0.65–0.70 s |
-| silence: bot asked after | never | 6.1 s of the caller's quiet (8 s after the bot stopped; the caller counts from 2 s) |
+| silence: bot asked after | never | 6.1 s as measured then: 8 s after the bot stopped, but the caller counted from 2 s later. It now counts from the bot's last sound, like the bot's timer |
 
 Fewer replies and a faster p95: calls end when their business is done, so the long, slow loops are gone.
 
@@ -193,7 +194,7 @@ pauses longer than 0.8 s mid-thought is still talked over; their next sentence t
 | `WinError 10054` / `RemoteProtocolError` while loading | Hugging Face dropped the download of `tiny.en` | Run again: the caller uses the cached copy first and only goes online when there is none |
 | A rule never fires; pytest says `TOML read a \b as a backspace` | `"\b"` in a TOML string is a backspace character | Write `"\\b"` |
 | Caller answers `Sorry, could you say that again?` to a clear question | No rule matched what tiny.en heard (it hears "Asha" as "a shaft") | Look at `heard` in `report.json`; widen the rule's regex |
-| `bot ended the call: caller` | The caller gave up (same line 3 times), or the bot stopped talking without hanging up | Read the turns (§ 3): a loop means the bot didn't end the call |
+| `bot ended the call: caller` | The caller gave up (the same line twice, about to say it a third time), or the bot stopped talking without hanging up | Read the turns (§ 3): a loop means the bot didn't end the call |
 | Every reply is slow | Another program is on the GPU, or a second Ollama model is loaded | `ollama ps`; close heavy programs and run again |
 | A browser call ends with "I'm sorry to hear that..." when you only mentioned being ill in passing | `hardship_said` is broad on purpose: a false match hands the case to a person | Expected. Narrow `_HARDSHIP` in `agent/call_state.py` only with a test for the case |
 | `escalation note: 'I lost my job last month.'` | The caller paused longer than `HARDSHIP_WAIT_SECS` between sentences, so the call closed before the second | Raise `HARDSHIP_WAIT_SECS` in `agent/config.py` (costs that much on the hardship closing line) |

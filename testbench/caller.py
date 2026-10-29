@@ -194,7 +194,8 @@ async def call(scenario: Scenario, voice: Voice, hearing: Hearing, url: str, wav
         log["turns"].append({"t": round(time.time() - t0, 1), "bot": heard, "caller": reply.say})
 
         if reply.wait:
-            quiet_from = time.time()
+            # From the bot's last sound, as its idle timer counts: turn_over already waited TURN_QUIET_SECS past it.
+            quiet_from = ear.last_loud
             while time.time() - quiet_from < reply.wait and not ear.closed:
                 await asyncio.sleep(0.1)
             spoke = ear.first_loud_after(quiet_from)

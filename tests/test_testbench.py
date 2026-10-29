@@ -214,3 +214,19 @@ def test_any_of_several_outcomes():
     expect = {"outcome": ["callback", "no_resolution"]}
     record = {**RECORD, "outcome": "no_resolution", "amount": None, "promise_date": None}
     assert "outcome" not in failed(score(expect, record, {}, [], {**ROWS, "promises": 0}, TODAY))
+
+
+def test_every_scenario_expects_an_outcome_the_bot_can_reach():
+    # A recorded callback closes the call as "callback"; the third wrong date of birth as "no_resolution".
+    for s in scenarios.load_all():
+        outcomes = s.expect["outcome"] if isinstance(s.expect["outcome"], list) else [s.expect["outcome"]]
+        if "callback" in s.expect:
+            assert outcomes == ["callback"], s.name
+        if s.expect.get("verify_attempts") == 3:
+            assert outcomes == ["no_resolution"], s.name
+
+
+def test_report_is_saved_after_every_call(tmp_path):
+    from testbench.run import save_report
+    save_report(tmp_path, [{"scenario": "happy", "run": 1, "passed": True}])
+    assert '"scenario": "happy"' in (tmp_path / "report.json").read_text(encoding="utf-8")

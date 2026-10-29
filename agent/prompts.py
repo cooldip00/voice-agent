@@ -57,7 +57,7 @@ STILL_THERE = ["Are you still there?", "Hello, can you hear me?"]
 IDLE_END = "I can't hear you, so I'll try again another time."
 
 
-_FAREWELL = re.compile(r"\b(goodbye|bye|have a (good|great|nice) (day|evening)|take care|call (will now end|has ended)|"
+_FAREWELL = re.compile(r"\b(goodbye|bye|have a (good|great|nice) (day|evening)|take care(?!\s+of\b)|call (will now end|has ended)|"
                        r"end (the|this) call)\b", re.IGNORECASE)
 
 
@@ -101,7 +101,7 @@ Call verify_identity with it as they said it.
 2. If they ask why you are calling, say it is a personal matter you can discuss with {customer_name} once \
 their date of birth is confirmed.
 3. If it is someone else, offer to call back at a better time for {customer_name}: agree a day and a time \
-between {start}:00 and {end}:00 and call schedule_callback with the day as they said it. The system then \
+from {start}:00 and before {end}:00 and call schedule_callback with the day as they said it. The system then \
 confirms it and ends the call. Or call end_call with wrong_person.
 4. When the person wants to stop, call end_call. Do not say goodbye yourself; the system says it.
 
@@ -140,7 +140,7 @@ Friday", and ask if that is right. Never suggest an amount yourself. Do not work
 the day as they said it. The system then confirms it to them.
 5. If they say they already paid, or the amount is wrong, call flag_dispute.
 6. If they cannot pay because of hardship (lost job, illness), call escalate_to_human.
-7. If they ask to be called later, agree a day and a time between {start}:00 and {end}:00 and call \
+7. If they ask to be called later, agree a day and a time from {start}:00 and before {end}:00 and call \
 schedule_callback with the day as they said it.
 After flag_dispute, escalate_to_human or schedule_callback succeeds, the system tells them what happens next \
 and ends the call.

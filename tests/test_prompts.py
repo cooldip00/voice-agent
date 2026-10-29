@@ -30,9 +30,10 @@ def test_system_prompt_lists_no_dates():
 
 def test_farewell():
     for text in ("Have a good day, Rahul.", "Goodbye!", "The call will now end.", "This call has ended.",
-                 prompts.GOODBYE):
+                 "Take care.", prompts.GOODBYE):
         assert prompts.is_farewell(text), text
-    for text in ("Is there anything else?", "When will you be able to pay?", prompts.greeting("Rahul Sharma")):
+    for text in ("Is there anything else?", "When will you be able to pay?", prompts.greeting("Rahul Sharma"),
+                 "I'll take care of the payment on Friday."):
         assert not prompts.is_farewell(text), text
 
 

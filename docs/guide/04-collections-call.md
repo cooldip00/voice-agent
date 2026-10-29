@@ -107,13 +107,13 @@ The LLM handles language. Code owns facts, dates and the rules. Each line below 
 | Joins back-to-back caller messages (`JoinCallerTurns`) | called `verify_identity` 1/10 when a pause split "14th of July." / "1985" into two turns; 10/10 joined |
 | Ends the call itself when the LLM says goodbye without `end_call` | often said "Have a nice day" and never called `end_call` |
 
-**Guards** (`unsafe_to_say` in `call_state.py`, run on every LLM sentence before it is spoken):
+**Guards** (`to_words` in `bot.py`, Kokoro's text transformer, runs them on every LLM sentence before it is spoken: the tool-name check itself, the rest through `unsafe_to_say` in `call_state.py`):
 
 | Stops a sentence that | Example stopped |
 |---|---|
 | mentions the debt before the DOB matched (RBI: no disclosure to third parties) | "It's regarding an overdue EMI that needs to be settled." |
 | asks the caller for a date format | "Please say it in the format YYYY-MM-DD." |
-| has an ISO date no tool returned | "Can you manage to pay 6800 rupees by next Friday, 2026-10-27?" |
+| has an ISO date no tool returned (today's date is allowed: the prompt gives it) | "Can you manage to pay 6800 rupees by next Friday, 2026-10-27?" |
 | claims something was recorded before any tool recorded it | "I see, your date of birth is now recorded as 1990-01-02." |
 | writes a tool call as text | `end_call(outcome="promise_to_pay")` |
 

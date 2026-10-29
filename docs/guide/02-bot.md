@@ -1,7 +1,7 @@
 # Step 2: the talking bot in the browser
 
 One command starts a local web server. You open the page, allow the mic, and talk to the bot:
-browser mic → Silero VAD + Smart Turn → Whisper → Qwen 7B → Kokoro → browser speaker.
+browser mic → Whisper → Silero VAD + Smart Turn (end of turn?) → Qwen 7B → Kokoro → browser speaker.
 Code: [agent/bot.py](../../agent/bot.py), settings in [agent/config.py](../../agent/config.py).
 
 ## 1. Start it
@@ -108,6 +108,6 @@ Comparing it with the next `Generating chat from context [...]` log line:
 | `error while attempting to bind on address ... 7860` | Another bot is still running. Close it, or find it: `Get-NetTCPConnection -LocalPort 7860` then `Stop-Process -Id <OwningProcess>`. Or use `--port 7861` |
 | Page connects but the bot never hears you | Mic blocked: click the icon left of the address bar → allow Microphone, reload |
 | The bot keeps stopping itself mid-sentence | It hears its own voice through the speakers. Use headphones |
-| First reply after a long idle takes ~5 s | Ollama unloaded Qwen. `ollama ps` shows how long it stays (`UNTIL`). Requests through Pipecat may reset it to Ollama's default 5 minutes (not verified yet); step 5 fixes it with the `OLLAMA_KEEP_ALIVE` setting |
+| First reply after a long idle takes ~5 s | Ollama unloaded Qwen. `ollama ps` shows how long it stays (`UNTIL`). The bot's startup warm-up loads it with `keep_alive` = `LLM_KEEP_ALIVE` (30 min, [agent/config.py](../../agent/config.py)); requests through Pipecat send no `keep_alive`, so they may reset it to Ollama's default 5 minutes (not verified). Ollama's own `OLLAMA_KEEP_ALIVE` environment variable changes that default; this project doesn't set it |
 | Call ends by itself after 5 minutes of silence | Pipecat's idle timeout (300 s). Reconnect |
 | `Data channel not ready, queuing message` | Harmless. Shown before the page's data channel opens (and always with the test script, which has none) |

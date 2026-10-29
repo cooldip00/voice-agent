@@ -108,32 +108,26 @@ WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", 
 
 MONTHS = ("january", "february", "march", "april", "may", "june", "july", "august", "september", "october",
           "november", "december")
-_MONTH = "(" + "|".join(MONTHS) + ")"
+# Whisper writes month names with a capital. A lowercase "may" is the verb: "the 5th may work" is the 5th.
+_MONTH = "(" + "|".join("(?-i:May)" if m == "may" else m for m in MONTHS) + ")"
 # "the 23rd", "23rd of October", "23 October" (a bare "23" could be anything), "October 23rd"
 _DAY_OF_MONTH = re.compile(rf"\b(\d{{1,2}})(?:(?:st|nd|rd|th)(?:\s+(?:of\s+)?{_MONTH})?|\s+(?:of\s+)?{_MONTH})\b"
-                           rf"|\b{_MONTH}\s+(?:the\s+)?(\d{{1,2}})(?:st|nd|rd|th)?\b")
+                           rf"|\b{_MONTH}\s+(?:the\s+)?(\d{{1,2}})(?:st|nd|rd|th)?\b", re.IGNORECASE)
+_YEAR_AFTER = re.compile(r",?\s*(?:19|20)\d\d\b")
+# Days counted from today. Longest first, and each is taken out of the text once read: "the day after
+# tomorrow" also contains "tomorrow", and "a week from today" contains "today".
+_RELATIVE_DAYS = (
+    (re.compile(r"\bday after tomorrow\b", re.IGNORECASE), 2),
+    (re.compile(r"\b(?:a|one) week from (?:today|now)\b|\bin (?:a|one) week\b", re.IGNORECASE), 7),
+    (re.compile(r"\btoday\b", re.IGNORECASE), 0),
+    (re.compile(r"\btomorrow\b", re.IGNORECASE), 1),
+)
 
 
-def resolve_day(day, today: date) -> date | None:
-    """The day as the caller said it ("Friday", "tomorrow", "the 23rd") -> a date. Code does this, not the
-    LLM: Qwen 7B turned "this Friday" into 2026-10-27, a Tuesday, even with the dates listed in its prompt.
-    A YYYY-MM-DD date is not accepted: while it was, Qwen passed today's date for "this Friday" in 4 of 20 runs.
-    A weekday means the next one after today (1 to 7 days ahead). A day of the month means the next date with
-    that day: this month or the next, or with a month named, this year or the next."""
-    text = str(day).strip().lower()
-    words = re.findall(r"[a-z]+", text)
-    # The caller's word beats a date next to it: "Friday 2026-10-27" means Friday.
-    if "today" in words:
-        return today
-    if "tomorrow" in words:
-        return today + timedelta(days=1)
-    for word in words:
-        if word.capitalize() in WEEKDAYS:
-            return today + timedelta(days=(WEEKDAYS.index(word.capitalize()) - today.weekday()) % 7 or 7)
-    if not (m := _DAY_OF_MONTH.search(text)):
-        return None
+def _day_of_month(m: re.Match, today: date) -> date | None:
     number, month = (int(m[1]), m[2] or m[3]) if m[1] else (int(m[5]), m[4])
     if month:
+        month = month.lower()
         tries = [(today.year, MONTHS.index(month) + 1), (today.year + 1, MONTHS.index(month) + 1)]
     else:
         tries = [(today.year, today.month), (today.year + today.month // 12, today.month % 12 + 1)]
@@ -147,6 +141,36 @@ def resolve_day(day, today: date) -> date | None:
     return None
 
 
+def _days_named(text, today: date) -> set[date]:
+    """Every day the text names. YYYY-MM-DD dates aren't read, and neither is a date with a year after it
+    ("the 5th of March, 1990" is a date of birth, not a day to pay or call back)."""
+    text = str(text)
+    days = set()
+    for phrase, ahead in _RELATIVE_DAYS:
+        if phrase.search(text):
+            days.add(today + timedelta(days=ahead))
+            text = phrase.sub(" ", text)
+    for word in re.findall(r"[a-z]+", text.lower()):
+        if word.capitalize() in WEEKDAYS:
+            days.add(today + timedelta(days=(WEEKDAYS.index(word.capitalize()) - today.weekday()) % 7 or 7))
+    for m in _DAY_OF_MONTH.finditer(text):
+        if not _YEAR_AFTER.match(text, m.end()) and (on := _day_of_month(m, today)):
+            days.add(on)
+    return days
+
+
+def resolve_day(day, today: date) -> date | None:
+    """The day as the caller said it ("Friday", "tomorrow", "the 23rd") -> a date. Code does this, not the
+    LLM: Qwen 7B turned "this Friday" into 2026-10-27, a Tuesday, even with the dates listed in its prompt.
+    A YYYY-MM-DD date is not accepted: while it was, Qwen passed today's date for "this Friday" in 4 of 20 runs.
+    A weekday means the next one after today (1 to 7 days ahead). A day of the month means the next date with
+    that day: this month or the next, or with a month named, this year or the next. The caller's word beats a
+    date next to it ("Friday 2026-10-27" means Friday); two different days ("not today, maybe Friday") are
+    no answer: code doesn't guess."""
+    days = _days_named(day, today)
+    return days.pop() if len(days) == 1 else None
+
+
 def caller_day(caller_turns: list[str], today: date) -> date | None:
     """The day from the caller's own words, for when the LLM passed a day code can't read: in 3 of 20 runs
     Qwen 7B passed today's date for "this Friday" and, refused, asked the caller to say it "in a different
@@ -154,11 +178,7 @@ def caller_day(caller_turns: list[str], today: date) -> date | None:
     ("Yes, that's right." names none, so the turn before it). If that turn names two different days ("not
     today, maybe Friday"), there is no answer: code doesn't guess."""
     for turn in reversed(caller_turns[-3:]):
-        text = turn.lower()
-        phrases = [w for w in re.findall(r"[a-z]+", text) if w in ("today", "tomorrow") or w.capitalize() in WEEKDAYS]
-        phrases += [m[0] for m in _DAY_OF_MONTH.finditer(text)]
-        days = {d for p in phrases if (d := resolve_day(p, today))}
-        if days:
+        if days := _days_named(turn, today):
             return days.pop() if len(days) == 1 else None
     return None
 
@@ -169,27 +189,46 @@ _NUMBER_WORDS = {w: i for i, w in enumerate(
     w: 10 * i for i, w in enumerate("twenty thirty forty fifty sixty seventy eighty ninety".split(), start=2)}
 _SCALES = {"hundred": 100, "thousand": 1000, "k": 1000, "lakh": 100_000, "lakhs": 100_000}
 _WHOLE_AMOUNT = re.compile(r"\b(full|whole|entire|total) amount\b|\ball of it\b|\beverything\b")
+_NOT = {"not", "t", "cannot", "never"}   # "can't" and "don't" end in the token "t"
+# These end a "not": "I can't pay over 2000" and "not today, 2000 on Friday" both name 2000.
+_NOT_ENDS = {"but", "only", "just", "more", "than", "over", "above", "except", "today", "tomorrow"}
 
 
 def amounts_said(text: str) -> set[int]:
     """Rupee amounts in one caller turn, as Whisper writes them: "4500", "4,500", "45 hundred", "5k",
     "four thousand five hundred". An ordinal ("the 23rd") is a day; anything below 100 is a day, a time or
-    a count, never a promise."""
+    a count, never a promise. An amount turned down ("I can't pay 4500, only 2000": up to 3 words after a
+    "not" in the same clause) isn't named, and nor is a year after a month ("5th of November, 2026")."""
     found, total, part, counting = set(), 0.0, 0.0, False
+    words: list[str] = []      # the turn so far, without punctuation
+    start = 0                  # where in words the current number began
+    not_at = None              # where in words this clause's "not" is
 
     def end_number():
         nonlocal total, part, counting
         value = total + part
-        if counting and value >= 100 and value.is_integer():
+        turned_down = not_at is not None and start - not_at <= 3
+        # Not "may": in "I may pay 2000" it's the verb.
+        year = 1900 <= value < 2100 and any(w in MONTHS and w != "may" for w in words[max(0, start - 3):start])
+        if counting and value >= 100 and value.is_integer() and not turned_down and not year:
             found.add(int(value))
         total, part, counting = 0.0, 0.0, False
 
-    for token in re.findall(r"\d+(?:\.\d+)?(?:st|nd|rd|th)?|[a-z]+", text.lower().replace(",", "")):
+    text = re.sub(r"(?<=\d),(?=\d)", "", text.lower())
+    for token in re.findall(r"\d+(?:\.\d+)?(?:st|nd|rd|th)?|[a-z]+|[.,;:!?]", text):
+        if token in ".,;:!?":
+            end_number()
+            not_at = None
+            continue
         if token[0].isdigit() and not token[-1].isalpha():
             if part:                      # "500 600": two numbers, not one
                 end_number()
+            if not counting:
+                start = len(words)
             part, counting = part + float(token), True
         elif token in _NUMBER_WORDS:
+            if not counting:
+                start = len(words)
             part, counting = part + _NUMBER_WORDS[token], True
         elif token in _SCALES and counting:
             if _SCALES[token] == 100:
@@ -198,6 +237,11 @@ def amounts_said(text: str) -> set[int]:
                 total, part = total + part * _SCALES[token], 0.0
         elif not (token == "and" and counting):
             end_number()
+            if token in _NOT:
+                not_at = len(words)
+            elif token in _NOT_ENDS or token.capitalize() in WEEKDAYS:
+                not_at = None
+        words.append(token)
     end_number()
     return found
 
@@ -244,7 +288,8 @@ def resolve_birth_date(text) -> date | None:
 
 
 def resolve_time(text) -> tuple[int, int] | None:
-    """"17:00", "5 pm", "5:30 PM" -> (hour, minute). A bare 1 to 7 means PM: calls end at 19:00."""
+    """"17:00", "5 pm", "5:30 PM" -> (hour, minute). A bare 1 to 7 means PM, since calls are in the day
+    (a bare 7 is 19:00, which check_callback then refuses as too late)."""
     m = re.fullmatch(r"\s*(\d{1,2})(?::(\d{2}))?\s*(?:([ap])\.?\s*m\.?)?\s*", str(text), re.IGNORECASE)
     if m is None:
         return None
@@ -266,11 +311,12 @@ def check_callback(call_at: str, now: datetime) -> str | None:
         return "time must be YYYY-MM-DDTHH:MM"
     if when <= now:
         return "time is in the past"
-    if when > now + timedelta(days=config.CALLBACK_MAX_DAYS):
+    # Counted in days, like a promise: next Thursday at 5 pm is 7 days away even when asked at 10 am.
+    if when.date() > now.date() + timedelta(days=config.CALLBACK_MAX_DAYS):
         return f"time must be within {config.CALLBACK_MAX_DAYS} days"
     if not within_call_hours(when):
         start, end = config.CALL_HOURS
-        return f"time must be between {start}:00 and {end}:00"
+        return f"time must be from {start}:00 and before {end}:00"
     return None
 
 
@@ -278,6 +324,10 @@ def check_outcome(state: CallState, outcome: str) -> str | None:
     """The outcome must match what the call actually recorded."""
     if outcome not in OUTCOMES:
         return f"outcome must be one of {', '.join(OUTCOMES)}"
+    recorded = {"promise_to_pay": state.promise, "callback": state.callback, "dispute": state.dispute,
+                "escalated": state.escalation}
+    if outcome in ("refused", "no_resolution") and any(recorded.values()):
+        return f"something was recorded, so the outcome is {' or '.join(k for k, v in recorded.items() if v)}"
     if outcome == "promise_to_pay" and state.promise is None:
         return "no promise was recorded; call record_promise first"
     if outcome == "callback" and state.callback is None:
@@ -302,9 +352,9 @@ _NOTICE = re.compile(r"\bcall (is|is being|will be) recorded\b", re.IGNORECASE)
 _JSON_TALK = re.compile(r'[{}]|"\w+"\s*:')
 # Hardship goes to a human (fair-practice rule). Qwen 7B bargained instead in 3 of 3 bench calls, so code
 # listens for it. Broad on purpose: a false match hands the case to a person, which is the safe side.
-_HARDSHIP = re.compile(r"\b(lost (my|his|her|our) (job|work|income)|no (job|work|income|salary)|jobless|unemployed|"
-                       r"laid off|salary (is |was |has )?(not|stopped|delayed)|hospital\w*|medical|surgery|"
-                       r"illness|sick|accident|passed away)\b", re.IGNORECASE)
+_HARDSHIP = re.compile(r"\b(lost (my|his|her|our|the) (job|work|income)|no (job|work|income|salary)|jobless|"
+                       r"unemployed|laid off|fired|salary (is |was |has )?(been )?(not|stopped|delayed)|hospital\w*|"
+                       r"medical|surgery|illness|sick|accident|passed away|died|death|funeral)\b", re.IGNORECASE)
 
 
 def hardship_said(text: str) -> bool:
@@ -312,12 +362,12 @@ def hardship_said(text: str) -> bool:
     return bool(_HARDSHIP.search(text))
 
 
-def unsafe_to_say(text: str, state: CallState) -> str | None:
+def unsafe_to_say(text: str, state: CallState, today: date | None = None) -> str | None:
     """Why a sentence the LLM wrote must not be spoken, or None if it may be.
 
     The last line of defence for rules the prompt asks for but can't guarantee. It works on words, so it
     is coarse on purpose: blocking a harmless sentence costs a moment of silence, saying a harmful one
-    can't be taken back.
+    can't be taken back. `today` is a date the LLM may say: its prompt gives it.
     """
     if not state.verified and _DEBT_WORDS.search(text):
         return "mentions the debt before identity is verified"
@@ -327,6 +377,8 @@ def unsafe_to_say(text: str, state: CallState) -> str | None:
         return "writes JSON"
     # Dates come from tools; in a test call Qwen offered a hardship caller "next Friday, 2026-10-27" (a Tuesday).
     given = set(_ISO_DATE.findall(json.dumps([c["result"] for c in state.tool_calls])))
+    if today:
+        given.add(today.isoformat())
     if any(d not in given for d in _ISO_DATE.findall(text)):
         return "states a date no tool gave"
     nothing_recorded = not (state.promise or state.callback or state.dispute or state.escalation)

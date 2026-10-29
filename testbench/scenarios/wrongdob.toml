@@ -15,6 +15,6 @@ say = [
 ]
 
 [expect]
-outcome = ["callback", "no_resolution"]
+outcome = "no_resolution"     # the third wrong date of birth closes the call
 verified = false
 verify_attempts = 3

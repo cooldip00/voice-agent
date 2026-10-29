@@ -37,10 +37,9 @@ The call leaves `calls/<id>.json`, built from what the tools accepted, never fro
 ## How it works
 ```mermaid
 flowchart LR
-    mic["Caller, browser<br/>WebRTC"] --> vad["Silero VAD<br/>0.2 s stop"]
-    vad --> turn["Smart Turn v3<br/>end of turn?"]
-    turn --> stt["Whisper<br/>distil-medium.en, GPU"]
-    stt --> code{"Code first:<br/>hardship?"}
+    mic["Caller, browser<br/>WebRTC"] --> stt["Whisper<br/>distil-medium.en, GPU"]
+    stt --> turn["Silero VAD 0.2 s stop<br/>+ Smart Turn v3, CPU:<br/>end of turn?"]
+    turn --> code{"Code first:<br/>hardship?"}
     code -- no --> llm["Qwen 2.5 7B<br/>Ollama, GPU"]
     llm <--> tools["7 tools<br/>SQLite bank"]
     llm --> guard["Guards on<br/>every sentence"]
@@ -104,7 +103,7 @@ bank rows and the transcript in code:
 | already_paid | says she paid | dispute, no promise | 3 / 3 |
 | hardship | lost his job, can pay 500 | escalated, note has the 500 | 3 / 3 |
 | dispute | the amount is wrong | dispute | 3 / 3 |
-| call_later | busy, call at 5 pm tomorrow | callback at the right time | 3 / 3 |
+| call_later | busy, call at 11 am tomorrow | callback at the right time | 3 / 3 |
 | wrong_person | someone else answers | callback, no loan details said | 3 / 3 |
 | wrongdob | three wrong dates of birth | locked, no loan details said | 3 / 3 |
 | interrupts | cuts the bot off mid-sentence | promise; bot stops in < 1 s | 3 / 3 |
@@ -147,8 +146,8 @@ The browser calls customer 1 (Rahul Sharma, date of birth 5 March 1990). To call
 before starting the bot; the six customers are in [agent/bank.py](agent/bank.py), e.g. `$env:CUSTOMER=3` is Arjun
 Mehta, who lost his job. Outside 08:00–19:00 the bot refuses to call; for a dev test, set `$env:ALLOW_ANY_HOUR=1`.
 ```powershell
-uv run pytest                             # 278 tests, no GPU or models needed
-uv run python -m testbench.run --runs 3   # the 27 calls, about 30 minutes
+uv run pytest                             # 313 tests, no GPU or models needed
+uv run python -m testbench.run --runs 3   # the 27 calls, about 40 minutes
 uv run python -m scripts.latency_report   # p50 / p95 per stage from the calls so far
 ```
 Step-by-step guides, with real output and what to do when it breaks: [docs/guide/](docs/guide/README.md).

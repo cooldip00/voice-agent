@@ -19,6 +19,6 @@ when = "is that (right|correct|okay|ok)|confirm\\b|shall i|should i"
 say = "Yes, okay."
 
 [expect]
-outcome = ["callback", "wrong_person"]
+outcome = "callback"          # a recorded callback closes the call as "callback"
 verified = false
 callback = "tomorrow 17:00"
